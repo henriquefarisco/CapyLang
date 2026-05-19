@@ -1,0 +1,11 @@
+[0..2] Arrow
+[2..3] Whitespace
+[3..5] FatArrow
+[5..6] Whitespace
+[6..8] ColonColon
+[8..9] Whitespace
+[9..11] DotDot
+[11..12] Whitespace
+[12..15] DotDotDot
+[15..16] Newline
+[16..16] Eof

@@ -1,0 +1,9 @@
+[0..3] Let
+[3..4] Whitespace
+[4..5] Ident "x"
+[5..6] Whitespace
+[6..7] Eq
+[7..8] Whitespace
+[8..10] Int "42"
+[10..11] Newline
+[11..11] Eof

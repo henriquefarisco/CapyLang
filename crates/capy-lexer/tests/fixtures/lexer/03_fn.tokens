@@ -1,0 +1,10 @@
+[0..2] Fn
+[2..3] Whitespace
+[3..7] Ident "main"
+[7..8] LParen
+[8..9] RParen
+[9..10] Whitespace
+[10..11] LBrace
+[11..12] RBrace
+[12..13] Newline
+[13..13] Eof

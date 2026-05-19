@@ -1,0 +1,9 @@
+[0..2] Fn
+[2..3] Whitespace
+[3..8] Ident "fnord"
+[8..9] Whitespace
+[9..13] Ident "fn_x"
+[13..14] Whitespace
+[14..17] Ident "_fn"
+[17..18] Newline
+[18..18] Eof

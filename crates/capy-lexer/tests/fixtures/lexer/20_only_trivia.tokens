@@ -1,0 +1,6 @@
+[0..2] Whitespace
+[2..7] LineComment
+[7..8] Newline
+[8..24] BlockComment
+[24..25] Newline
+[25..25] Eof

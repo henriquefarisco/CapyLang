@@ -1,0 +1,15 @@
+[package]
+name = "capy-lexer"
+description = "CapyLang lexer with span tracking and recoverable diagnostics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+logos = "0.14"

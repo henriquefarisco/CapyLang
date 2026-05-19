@@ -1,0 +1,11 @@
+[0..2] If
+[2..3] Whitespace
+[3..7] True
+[7..8] Whitespace
+[8..9] LBrace
+[9..10] Whitespace
+[10..14] NoneKw
+[14..15] Whitespace
+[15..16] RBrace
+[16..17] Newline
+[17..17] Eof

@@ -1,2 +1,4 @@
 .windsurf/
 build/
+target/
+**/*.rs.bk

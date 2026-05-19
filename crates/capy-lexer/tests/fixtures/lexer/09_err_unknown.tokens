@@ -1,0 +1,3 @@
+[0..1] Error UnknownChar "$"
+[1..2] Newline
+[2..2] Eof

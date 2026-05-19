@@ -1,0 +1,6 @@
+[0..6] Error UnterminatedString "\"line1"
+[6..7] Newline
+[7..12] Ident "line2"
+[12..13] Error UnterminatedString "\""
+[13..14] Newline
+[14..14] Eof

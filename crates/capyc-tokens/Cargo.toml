@@ -1,0 +1,19 @@
+[package]
+name = "capyc-tokens"
+description = "Stand-alone CLI front-end that prints the canonical CapyLang token dump for a source file"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "capyc-tokens"
+path = "src/main.rs"
+
+[dependencies]
+capy-lexer = { path = "../capy-lexer" }

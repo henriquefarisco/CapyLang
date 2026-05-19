@@ -1,0 +1,9 @@
+[0..4] Int "0x1A"
+[4..5] Whitespace
+[5..11] Int "0b1010"
+[11..12] Whitespace
+[12..16] Int "0o77"
+[16..17] Whitespace
+[17..23] Int "42_000"
+[23..24] Newline
+[24..24] Eof

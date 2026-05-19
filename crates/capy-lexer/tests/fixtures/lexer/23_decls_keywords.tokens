@@ -1,0 +1,27 @@
+[0..3] Pub
+[3..4] Whitespace
+[4..10] Struct
+[10..11] Whitespace
+[11..12] Ident "S"
+[12..13] Whitespace
+[13..17] Enum
+[17..18] Whitespace
+[18..19] Ident "E"
+[19..20] Whitespace
+[20..25] Trait
+[25..26] Whitespace
+[26..27] Ident "T"
+[27..28] Whitespace
+[28..32] Impl
+[32..33] Whitespace
+[33..34] Ident "I"
+[34..35] Whitespace
+[35..39] Type
+[39..40] Whitespace
+[40..41] Ident "A"
+[41..42] Whitespace
+[42..47] Const
+[47..48] Whitespace
+[48..49] Ident "B"
+[49..50] Newline
+[50..50] Eof

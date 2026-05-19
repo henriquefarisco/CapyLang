@@ -1,0 +1,92 @@
+(* CapyLang grammar - EBNF                                                    *)
+(* Contract pinned by slice S1 (lexer) and incrementally extended by S2-S29.  *)
+(* Updates must remain additive within a major version; see                   *)
+(* docs/compatibility.md for the global versioning rules.                     *)
+
+(* === S1: Lexical grammar (active) ==========================================*)
+
+source        = { token } ;
+
+token         = trivia
+              | literal
+              | keyword
+              | ident
+              | punctuation
+              | operator
+              | error ;
+
+(* --- Trivia --------------------------------------------------------------- *)
+
+trivia        = whitespace
+              | newline
+              | line_comment
+              | block_comment ;
+
+whitespace    = { " " | "\t" } ;
+newline       = [ "\r" ] , "\n" ;
+line_comment  = "//" , { ? any byte except CR or LF ? } ;
+block_comment = "/*" , { block_comment | ? any char except "*/" ? } , "*/" ;
+
+(* --- Literals ------------------------------------------------------------- *)
+
+literal       = int_literal | float_literal | string_literal ;
+
+int_literal   = dec_int | hex_int | bin_int | oct_int ;
+dec_int       = "0" | nonzero_digit , { digit | "_" } ;
+hex_int       = "0x" , hex_digit , { hex_digit | "_" } ;
+bin_int       = "0b" , bin_digit , { bin_digit | "_" } ;
+oct_int       = "0o" , oct_digit , { oct_digit | "_" } ;
+
+float_literal = digit , { digit | "_" } , "." , digit , { digit | "_" } ,
+                [ exponent ]
+              | digit , { digit | "_" } , exponent ;
+exponent      = ( "e" | "E" ) , [ "+" | "-" ] , digit , { digit | "_" } ;
+
+digit         = "0" | nonzero_digit ;
+nonzero_digit = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+hex_digit     = digit | "a" | "b" | "c" | "d" | "e" | "f"
+                      | "A" | "B" | "C" | "D" | "E" | "F" ;
+bin_digit     = "0" | "1" ;
+oct_digit     = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" ;
+
+string_literal = '"' , { string_char } , '"' ;
+string_char    = ? any unicode scalar value except '"', '\\' or LF ?
+               | "\\" , escape_payload ;
+escape_payload = ? deferred to S2 (parser) - opaque to S1 lexer ? ;
+
+(* --- Identifiers and keywords -------------------------------------------- *)
+
+ident         = id_start , { id_continue } ;
+id_start      = ? unicode XID_Start property ? | "_" ;
+id_continue   = ? unicode XID_Continue property ? ;
+
+keyword       = "fn"     | "let"      | "const"    | "if"     | "else"
+              | "while"  | "for"      | "in"       | "loop"   | "break"
+              | "continue" | "return" | "match"    | "try"    | "catch"
+              | "throw"  | "async"    | "await"    | "import" | "from"
+              | "as"     | "enum"     | "trait"    | "impl"   | "struct"
+              | "type"   | "arena"    | "pub"      | "true"   | "false"
+              | "None"   | "Some" ;
+
+(* --- Punctuation and operators ------------------------------------------- *)
+
+punctuation   = "(" | ")" | "{" | "}" | "[" | "]"
+              | "," | ";" | "::" | ":"
+              | "..." | ".." | "."
+              | "->" | "=>" | "?" | "@" ;
+
+operator      = "==" | "=" | "!=" | "!"
+              | "<=" | "<<" | "<" | ">=" | ">>" | ">"
+              | "&&" | "&" | "||" | "|" | "^" | "~"
+              | "+=" | "+" | "-=" | "-"
+              | "*=" | "*" | "/=" | "/"
+              | "%=" | "%" ;
+
+error         = ? any byte sequence not matched above ? ;
+
+(* === S2: Syntactic grammar (planned) ======================================*)
+(* Filled in during slice S2 once the parser is implemented. Reserved here   *)
+(* so external tooling can already track the file for diffs.                 *)
+
+program       = { item } ;
+item          = ? S2 ? ;

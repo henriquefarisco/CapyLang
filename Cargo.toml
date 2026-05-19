@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = ["crates/capy-lexer", "crates/capyc-tokens"]
+
+[workspace.package]
+version = "0.1.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/henriquefarisco/CapyLang"
+rust-version = "1.75"
+authors = ["CapyLang contributors"]
+
+[workspace.lints.rust]
+# `unsafe_code` is intentionally not denied at workspace level because the
+# `logos` derive macro emits a small number of `unsafe` blocks (e.g. for
+# branchless lookup tables). The lexer crate forbids `unsafe` in its own
+# source via `#![forbid(unsafe_code)]` only inside modules that do not host
+# the derive output.
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.bench]
+lto = "thin"
+codegen-units = 1

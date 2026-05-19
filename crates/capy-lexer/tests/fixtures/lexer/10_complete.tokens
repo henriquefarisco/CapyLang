@@ -1,0 +1,21 @@
+[0..2] Fn
+[2..3] Whitespace
+[3..8] Ident "dobro"
+[8..9] LParen
+[9..10] Ident "x"
+[10..11] RParen
+[11..12] Whitespace
+[12..13] LBrace
+[13..14] Newline
+[14..18] Whitespace
+[18..24] Return
+[24..25] Whitespace
+[25..26] Ident "x"
+[26..27] Whitespace
+[27..28] Star
+[28..29] Whitespace
+[29..30] Int "2"
+[30..31] Newline
+[31..32] RBrace
+[32..33] Newline
+[33..33] Eof

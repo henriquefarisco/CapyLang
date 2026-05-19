@@ -1,0 +1,9 @@
+[0..3] Let
+[3..4] Whitespace
+[4..9] Ident "café"
+[9..10] Whitespace
+[10..11] Eq
+[11..12] Whitespace
+[12..13] Int "1"
+[13..14] Newline
+[14..14] Eof

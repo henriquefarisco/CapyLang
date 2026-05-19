@@ -1,0 +1,7 @@
+[0..4] Float "1e10"
+[4..5] Whitespace
+[5..11] Float "2.5e-3"
+[11..12] Whitespace
+[12..19] Float "1_000.5"
+[19..20] Newline
+[20..20] Eof
