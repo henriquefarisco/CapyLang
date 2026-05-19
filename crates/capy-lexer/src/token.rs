@@ -249,12 +249,11 @@ fn lex_string(lex: &mut Lexer<TokenKind>) -> Result<(), ()> {
     let mut chars = remainder.char_indices();
     while let Some((i, c)) = chars.next() {
         match c {
-            '\\' => {
-                if chars.next().is_none() {
-                    lex.bump(remainder.len());
-                    return Err(());
-                }
+            '\\' if chars.next().is_none() => {
+                lex.bump(remainder.len());
+                return Err(());
             }
+            '\\' => {}
             '"' => {
                 lex.bump(i + c.len_utf8());
                 return Ok(());
