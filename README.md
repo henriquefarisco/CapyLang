@@ -1,6 +1,6 @@
 # CapyLang
 
-Version: 0.1.1
+Version: 0.1.2
 
 CapyLang is the external language-core repository for CapyOS.
 
@@ -32,7 +32,7 @@ fixtures and exposes two stable `TokenKind` predicates (`carries_text`,
 
 ## CapyOS integration contract
 
-CapyOS core pinned: `0.8.0-alpha.240+20260519`.
+CapyOS core pinned: `0.8.0-alpha.241+20260519`.
 
 CapyOS integration must follow:
 
