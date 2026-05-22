@@ -1,0 +1,6 @@
+[0..21] Source
+  [0..20] Item Const "PI"
+    Type
+      [10..13] TypePath "f64"
+    Init
+      [16..19] Int "314"

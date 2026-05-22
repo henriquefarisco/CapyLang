@@ -1,0 +1,6 @@
+[0..17] Source
+  [0..16] Let "x"
+    Type
+      [7..10] TypePath "i32"
+    Init
+      [13..15] Int "42"

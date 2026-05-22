@@ -1,0 +1,5 @@
+[0..5] Binary Add
+  [0..1] Int "1"
+  [4..5] Error
+--- diagnostics ---
+[4..5] UnexpectedToken found=RParen expected=expression

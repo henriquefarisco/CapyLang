@@ -1,0 +1,5 @@
+[0..32] Source
+  [0..31] Item Enum "Color"
+    [13..16] Variant "Red"
+    [18..23] Variant "Green"
+    [25..29] Variant "Blue"

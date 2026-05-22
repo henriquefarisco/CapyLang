@@ -1,0 +1,8 @@
+[0..20] Block
+  [2..12] Let "x"
+    Init
+      [10..11] Int "1"
+  Tail
+    [13..18] Binary Add
+      [13..14] Ident "x"
+      [17..18] Int "1"

@@ -1,0 +1,5 @@
+[0..9] Binary Add
+  [0..1] Int "1"
+  [4..9] Binary Mul
+    [4..5] Int "2"
+    [8..9] Int "3"

@@ -9,15 +9,57 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 
 [[package]]
+name = "capy-ast"
+version = "0.1.3"
+dependencies = [
+ "capy-lexer",
+]
+
+[[package]]
+name = "capy-diagnostics"
+version = "0.1.3"
+dependencies = [
+ "capy-lexer",
+ "capy-parser",
+]
+
+[[package]]
+name = "capy-emitter"
+version = "0.1.3"
+dependencies = [
+ "capy-ast",
+ "capy-bytecode",
+ "capy-lexer",
+ "capy-parser",
+]
+
+[[package]]
 name = "capy-lexer"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "logos",
 ]
 
 [[package]]
+name = "capy-parser"
+version = "0.1.3"
+dependencies = [
+ "capy-ast",
+ "capy-lexer",
+]
+
+[[package]]
+name = "capy-vm"
+version = "0.1.3"
+dependencies = [
+ "capy-bytecode",
+ "capy-emitter",
+ "capy-parser",
+]
+
+[[package]]
 name = "capyc-tokens"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "capy-lexer",
 ]

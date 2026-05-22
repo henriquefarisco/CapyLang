@@ -1,0 +1,15 @@
+[0..40] Source
+  [0..39] Item Fn "add"
+    Params
+      [7..13] Param "x"
+        [10..13] TypePath "i32"
+      [15..21] Param "y"
+        [18..21] TypePath "i32"
+    RetType
+      [26..29] TypePath "i32"
+    Body
+      [30..39] Block
+        Tail
+          [32..37] Binary Add
+            [32..33] Ident "x"
+            [36..37] Ident "y"

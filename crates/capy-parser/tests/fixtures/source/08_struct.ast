@@ -1,0 +1,6 @@
+[0..32] Source
+  [0..31] Item Struct "Point"
+    [15..21] Field "x"
+      [18..21] TypePath "i32"
+    [23..29] Field "y"
+      [26..29] TypePath "i32"

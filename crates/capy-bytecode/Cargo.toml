@@ -1,0 +1,15 @@
+[package]
+name = "capy-bytecode"
+description = "CapyLang bytecode v0 container: frozen header, section framing, deterministic loader (slice S4)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+blake3 = "1"

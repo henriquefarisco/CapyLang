@@ -1,0 +1,7 @@
+[0..13] While
+  Cond
+    [6..7] Ident "x"
+  Body
+    [8..13] Block
+      Tail
+        [10..11] Int "1"

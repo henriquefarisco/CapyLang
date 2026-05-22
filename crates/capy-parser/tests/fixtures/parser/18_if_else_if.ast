@@ -1,0 +1,19 @@
+[0..37] If
+  Cond
+    [3..4] Ident "a"
+  Then
+    [5..10] Block
+      Tail
+        [7..8] Int "1"
+  Else
+    [16..37] If
+      Cond
+        [19..20] Ident "b"
+      Then
+        [21..26] Block
+          Tail
+            [23..24] Int "2"
+      Else
+        [32..37] Block
+          Tail
+            [34..35] Int "3"

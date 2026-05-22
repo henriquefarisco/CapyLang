@@ -1,0 +1,4 @@
+[0..16] Source
+  [0..15] Item TypeAlias "Int"
+    Type
+      [11..14] TypePath "i32"

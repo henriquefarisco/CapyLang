@@ -1,0 +1,7 @@
+[0..22] Source
+  [0..10] Let "x"
+    Init
+      [8..9] Int "1"
+  [11..21] Let "y"
+    Init
+      [19..20] Ident "x"

@@ -84,9 +84,172 @@ operator      = "==" | "=" | "!=" | "!"
 
 error         = ? any byte sequence not matched above ? ;
 
-(* === S2: Syntactic grammar (planned) ======================================*)
-(* Filled in during slice S2 once the parser is implemented. Reserved here   *)
-(* so external tooling can already track the file for diffs.                 *)
+(* === S2.0: Expression grammar (active, parser slice S2.0) =================*)
+(* Implemented by `crates/capy-parser/`. Statements, items and control flow  *)
+(* are added in subsequent S2.x slices and must remain additive within v0.   *)
 
-program       = { item } ;
-item          = ? S2 ? ;
+expression    = binary_expr ;
+
+(* Precedence-climbing. Binding levels (low to high) match the numeric       *)
+(* `BinOp::precedence()` in `crates/capy-ast/src/expr.rs`.                   *)
+binary_expr   = unary_expr , { bin_op , unary_expr } ;
+
+bin_op        = "||"                                                (* 1 *)
+              | "&&"                                                (* 2 *)
+              | "|"                                                 (* 3 *)
+              | "^"                                                 (* 4 *)
+              | "&"                                                 (* 5 *)
+              | "==" | "!="                                         (* 6 *)
+              | "<"  | "<=" | ">" | ">="                            (* 7 *)
+              | "<<" | ">>"                                         (* 8 *)
+              | "+"  | "-"                                          (* 9 *)
+              | "*"  | "/" | "%" ;                                  (* 10 *)
+
+unary_expr    = { un_op } , postfix_expr ;
+un_op         = "-" | "!" | "~" ;
+
+postfix_expr  = primary_expr , { postfix_suffix } ;
+postfix_suffix = "(" , [ call_args ] , ")"
+              | "[" , expression , "]"
+              | "." , ident ;
+call_args     = expression , { "," , expression } , [ "," ] ;
+
+primary_expr  = int_literal
+              | float_literal
+              | string_literal
+              | "true" | "false" | "None"
+              | path_expr
+              | "(" , expression , ")"
+              | block_expr
+              | if_expr
+              | while_expr
+              | loop_expr
+              | match_expr
+              | return_expr
+              | break_expr
+              | continue_expr ;
+
+path_expr     = ident , { "::" , ident } ;
+
+(* --- S2.2: Control flow primaries (active) ------------------------------ *)
+(* `if`/`while`/`loop` carry a block body and are block-like (statement     *)
+(* form may omit `;`). `return`/`break`/`continue` are NOT block-like; as   *)
+(* statements they must terminate with `;`.                                *)
+
+if_expr       = "if" , expression , block_expr ,
+                [ "else" , ( if_expr | block_expr ) ] ;
+while_expr    = "while" , expression , block_expr ;
+loop_expr     = "loop" , block_expr ;
+return_expr   = "return" , [ expression ] ;
+break_expr    = "break"  , [ expression ] ;
+continue_expr = "continue" ;
+
+(* --- S2.2b: match expressions and patterns (active) -------------------- *)
+(* `match` is block-like (statement form may omit `;`). The arm comma is  *)
+(* mandatory between non-block-like bodies and optional after a block-    *)
+(* like body. Patterns nest under `pattern`; `..=` is recognised by       *)
+(* spatial adjacency of `..` and `=` (no whitespace between).             *)
+
+match_expr    = "match" , expression , "{" , [ match_arm_list ] , "}" ;
+match_arm_list = match_arm , { "," , match_arm } , [ "," ] ;
+match_arm     = pattern , [ "if" , expression ] , "=>" , expression ;
+
+pattern       = or_pattern ;
+or_pattern    = primary_pattern , { "|" , primary_pattern } ;
+primary_pattern = wildcard_pattern
+              | rest_pattern
+              | literal_pattern
+              | range_pattern
+              | path_or_ctor_pattern ;
+
+wildcard_pattern = "_" ;                       (* lexed as `Ident` "_"     *)
+rest_pattern     = ".." ;
+literal_pattern  = [ "-" ] , ( int_literal | float_literal )
+                 | string_literal
+                 | "true" | "false" | "None" ;
+range_pattern    = literal_pattern , ( ".." | "..=" ) , primary_pattern ;
+
+path_or_ctor_pattern = path_pattern
+                     | tuple_struct_pattern
+                     | struct_pattern ;
+path_pattern         = ident , { "::" , ident } ;          (* may be 1+ *)
+tuple_struct_pattern = path_pattern , "(" , [ pattern_list ] , ")" ;
+struct_pattern       = path_pattern , "{" ,
+                       [ struct_pattern_field_list ] , "}" ;
+pattern_list         = pattern , { "," , pattern } , [ "," ] ;
+struct_pattern_field_list =
+                       struct_pattern_field
+                       , { "," , struct_pattern_field }
+                       , [ "," , ".." ]
+                       , [ "," ] ;
+struct_pattern_field = ident , [ ":" , pattern ] ;
+
+(* === S2.1: Statements, blocks and top-level source (active) ==============*)
+(* Implemented by `crates/capy-parser/` (`parse_source`, internal             *)
+(* `parse_block_expr` / `parse_let_stmt` / `parse_expr_stmt`). The block     *)
+(* expression participates in `primary_expr` above. Items (`fn`, `struct`,  *)
+(* `const`, ...) land in S2.x sub-slices.                                   *)
+
+source        = { stmt } ;                          (* top-level source unit *)
+
+block_expr    = "{" , { stmt } , [ tail_expr ] , "}" ;
+tail_expr     = expression ;                        (* no trailing `;`       *)
+
+stmt          = let_stmt
+              | expr_stmt
+              | item_stmt ;
+
+let_stmt      = "let" , ident , [ ":" , type ] , [ "=" , expression ] , ";" ;
+
+expr_stmt     = expression , ";"                    (* statement with `;`    *)
+              | block_like_expr ;                   (* `{...}` (and S2.2     *)
+                                                    (* `if`/`while`/`loop`)  *)
+                                                    (* may omit `;`         *)
+block_like_expr = block_expr | if_expr | while_expr | loop_expr | match_expr ;
+
+(* === S2.3a: Item declarations (active) =================================== *)
+(* `fn`, `const`, `struct` delivered. `enum`, `trait`, `impl`, `type`,      *)
+(* `import` land in subsequent S2.3 sub-slices. Items may appear at the     *)
+(* top level of a `source` and inside any `block_expr`.                    *)
+
+item_stmt     = fn_item | const_item | struct_item
+              | type_alias_item | enum_item | import_item ;
+
+fn_item       = "fn" , ident , "(" , [ param_list ] , ")" ,
+                [ "->" , type ] , block_expr ;
+param_list    = param , { "," , param } , [ "," ] ;
+param         = ident , ":" , type ;
+
+const_item    = "const" , ident , ":" , type , "=" , expression , ";" ;
+
+struct_item   = "struct" , ident , "{" , [ struct_field_list ] , "}" ;
+struct_field_list = struct_field , { "," , struct_field } , [ "," ] ;
+struct_field  = ident , ":" , type ;
+
+(* === S2.3b: type/enum/import + dedicated type grammar (active) =========== *)
+(* `Type` is a first-class AST node (replacing the previous `type_ann =     *)
+(* expression` placeholder). S2.3b ships path types only; tuple, function,  *)
+(* array, reference, generic and trait-object types land in later sub-     *)
+(* slices.                                                                  *)
+
+type_alias_item = "type" , ident , "=" , type , ";" ;
+
+enum_item     = "enum" , ident , "{" , [ variant_list ] , "}" ;
+variant_list  = variant , { "," , variant } , [ "," ] ;
+variant       = ident , [ variant_payload ] ;
+variant_payload = "(" , [ tuple_types ] , ")"
+                | "{" , [ struct_field_list ] , "}" ;
+tuple_types   = type , { "," , type } , [ "," ] ;
+
+import_item   = "import" , import_path , [ "as" , ident ] , ";" ;
+import_path   = ident , { "::" , ident } ;
+
+type          = type_path ;
+type_path     = ident , { "::" , ident } ;
+
+(* === S2.3c+: Remaining grammar (planned) ================================= *)
+(* `trait` and `impl` land in S2.3c. Tuple/function/array/reference/        *)
+(* generic type forms extend `type` in later sub-slices. (S2.2b ships       *)
+(* `match` expressions and the pattern grammar above.)                      *)
+
+program       = source ;

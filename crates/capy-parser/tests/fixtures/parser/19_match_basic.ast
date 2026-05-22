@@ -1,0 +1,12 @@
+[0..27] Match
+  Scrutinee
+    [6..7] Ident "x"
+  [10..17] Arm
+    [10..11] PatLiteral
+      [10..11] Int "1"
+    Body
+      [15..17] Int "10"
+  [19..25] Arm
+    [19..20] PatWildcard
+    Body
+      [24..25] Int "0"

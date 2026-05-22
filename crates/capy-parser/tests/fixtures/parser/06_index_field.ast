@@ -1,0 +1,4 @@
+[0..11] Field "name"
+  [0..6] Index
+    [0..3] Ident "arr"
+    [4..5] Int "0"

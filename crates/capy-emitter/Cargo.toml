@@ -1,0 +1,20 @@
+[package]
+name = "capy-emitter"
+description = "CapyLang AST → bytecode emitter: lowers a parsed Source into a v0 Module (slice S5b)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+capy-ast = { path = "../capy-ast" }
+capy-bytecode = { path = "../capy-bytecode" }
+capy-lexer = { path = "../capy-lexer" }
+
+[dev-dependencies]
+capy-parser = { path = "../capy-parser" }

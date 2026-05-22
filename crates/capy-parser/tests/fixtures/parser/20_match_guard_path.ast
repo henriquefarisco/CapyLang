@@ -1,0 +1,22 @@
+[0..53] Match
+  Scrutinee
+    [6..7] Ident "v"
+  [10..31] Arm
+    [10..17] PatTupleStruct "Some"
+      [15..16] PatIdent "x"
+    Guard
+      [21..26] Binary Gt
+        [21..22] Ident "x"
+        [25..26] Int "0"
+    Body
+      [30..31] Ident "x"
+  [33..42] Arm
+    [33..37] PatLiteral
+      [33..37] NoneLit
+    Body
+      [41..42] Int "0"
+  [44..51] Arm
+    [44..45] PatWildcard
+    Body
+      [49..51] Unary Neg
+        [50..51] Int "1"

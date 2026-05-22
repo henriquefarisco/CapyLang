@@ -52,10 +52,10 @@ jobs:
 
       - name: Reject accidental golden updates
         run: |
-          if git diff --quiet -- crates/capy-lexer/tests/fixtures; then
+          if git diff --quiet -- crates/capy-lexer/tests/fixtures crates/capy-parser/tests/fixtures; then
             echo "fixtures clean"
           else
-            echo "::error::golden fixtures changed after cargo test; commit the .tokens diff or fix the lexer" >&2
-            git diff -- crates/capy-lexer/tests/fixtures
+            echo "::error::golden fixtures changed after cargo test; commit the .tokens / .ast diff or fix the lexer / parser" >&2
+            git diff -- crates/capy-lexer/tests/fixtures crates/capy-parser/tests/fixtures
             exit 1
           fi

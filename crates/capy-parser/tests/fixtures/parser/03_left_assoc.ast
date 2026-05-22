@@ -1,0 +1,5 @@
+[0..10] Binary Sub
+  [0..6] Binary Sub
+    [0..2] Int "10"
+    [5..6] Int "3"
+  [9..10] Int "1"

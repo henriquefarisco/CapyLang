@@ -1,0 +1,19 @@
+[package]
+name = "capy-diagnostics"
+description = "CapyLang structured diagnostics: severity, codes, labels, source map and renderer (slice S3)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+capy-lexer = { path = "../capy-lexer" }
+capy-parser = { path = "../capy-parser" }
+capy-bytecode = { path = "../capy-bytecode" }
+capy-emitter = { path = "../capy-emitter" }
+capy-vm = { path = "../capy-vm" }

@@ -1,0 +1,24 @@
+[0..57] Match
+  Scrutinee
+    [6..7] Ident "p"
+  [10..25] Arm
+    [10..20] PatOr
+      [10..15] PatRange ..=
+        [10..11] PatLiteral
+          [10..11] Int "0"
+        [14..15] PatLiteral
+          [14..15] Int "9"
+      [18..20] PatLiteral
+        [18..20] Unary Neg
+          [19..20] Int "1"
+    Body
+      [24..25] Int "1"
+  [27..47] Arm
+    [27..42] PatStruct "Point" ..
+      [35..36] PatField "x"
+    Body
+      [46..47] Ident "x"
+  [49..55] Arm
+    [49..50] PatWildcard
+    Body
+      [54..55] Int "0"

@@ -1,0 +1,11 @@
+[0..21] If
+  Cond
+    [3..4] Ident "x"
+  Then
+    [5..10] Block
+      Tail
+        [7..8] Int "1"
+  Else
+    [16..21] Block
+      Tail
+        [18..19] Int "2"

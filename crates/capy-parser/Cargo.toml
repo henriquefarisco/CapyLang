@@ -1,0 +1,16 @@
+[package]
+name = "capy-parser"
+description = "CapyLang recursive-descent parser (slice S2)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+capy-ast = { path = "../capy-ast" }
+capy-lexer = { path = "../capy-lexer" }
