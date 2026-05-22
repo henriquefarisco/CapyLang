@@ -104,12 +104,13 @@ pub fn parse_sections(body: &[u8]) -> Result<Vec<Section>, BytecodeError> {
             body[cursor + 4],
         ]) as usize;
         let payload_start = cursor + SECTION_HEADER_SIZE;
-        let payload_end = payload_start
-            .checked_add(len)
-            .ok_or(BytecodeError::MalformedSection {
-                offset: cursor,
-                reason: "section length overflow",
-            })?;
+        let payload_end =
+            payload_start
+                .checked_add(len)
+                .ok_or(BytecodeError::MalformedSection {
+                    offset: cursor,
+                    reason: "section length overflow",
+                })?;
         if payload_end > body.len() {
             return Err(BytecodeError::MalformedSection {
                 offset: cursor,

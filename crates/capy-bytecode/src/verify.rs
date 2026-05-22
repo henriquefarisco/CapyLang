@@ -397,7 +397,11 @@ fn resolve_jump_target(
 mod tests {
     use super::*;
 
-    fn verify(instructions: &[Instruction], locals: u32, callees: &[u32]) -> Result<u32, VerifyError> {
+    fn verify(
+        instructions: &[Instruction],
+        locals: u32,
+        callees: &[u32],
+    ) -> Result<u32, VerifyError> {
         verify_function(instructions, locals, callees).map(|r| r.max_depth)
     }
 
@@ -450,7 +454,9 @@ mod tests {
             Instruction::Return,
         ];
         match verify(&ins, 0, &[]).unwrap_err() {
-            VerifyError::StackUnderflow { required, depth, .. } => {
+            VerifyError::StackUnderflow {
+                required, depth, ..
+            } => {
                 assert_eq!(required, 2);
                 assert_eq!(depth, 1);
             }
@@ -598,10 +604,7 @@ mod tests {
         let ins = vec![
             Instruction::LoadConst(0),
             Instruction::LoadConst(1),
-            Instruction::Call {
-                fn_idx: 0,
-                argc: 2,
-            },
+            Instruction::Call { fn_idx: 0, argc: 2 },
             Instruction::Return,
         ];
         // Callee 0 has locals_count >= 2.
@@ -612,10 +615,7 @@ mod tests {
     #[test]
     fn call_with_unknown_fn_idx_traps() {
         let ins = vec![
-            Instruction::Call {
-                fn_idx: 5,
-                argc: 0,
-            },
+            Instruction::Call { fn_idx: 5, argc: 0 },
             Instruction::Return,
         ];
         match verify(&ins, 0, &[0]).unwrap_err() {
@@ -634,10 +634,7 @@ mod tests {
         // Callee has locals_count = 0, but argc = 1.
         let ins = vec![
             Instruction::LoadConst(0),
-            Instruction::Call {
-                fn_idx: 0,
-                argc: 1,
-            },
+            Instruction::Call { fn_idx: 0, argc: 1 },
             Instruction::Return,
         ];
         match verify(&ins, 0, &[0]).unwrap_err() {

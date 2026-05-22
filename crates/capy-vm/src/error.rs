@@ -338,7 +338,10 @@ mod tests {
             reason: "log::info expects a Str argument",
         };
         let s = format!("{e}");
-        assert!(s.starts_with("[V0016] host call `log::info` rejected: "), "got {s:?}");
+        assert!(
+            s.starts_with("[V0016] host call `log::info` rejected: "),
+            "got {s:?}"
+        );
         assert!(s.ends_with("at pc=0x000c"), "got {s:?}");
     }
 
@@ -415,10 +418,7 @@ mod tests {
                 },
                 V_MALFORMED_MODULE,
             ),
-            (
-                VmError::ExpectedBool { pc: 0, found: "f" },
-                V_EXPECTED_BOOL,
-            ),
+            (VmError::ExpectedBool { pc: 0, found: "f" }, V_EXPECTED_BOOL),
             (
                 VmError::CallStackOverflow { pc: 0, depth: 1 },
                 V_CALL_STACK_OVERFLOW,

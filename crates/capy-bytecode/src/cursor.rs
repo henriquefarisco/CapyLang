@@ -21,10 +21,6 @@ impl<'a> Cursor<'a> {
         self.pos
     }
 
-    pub(crate) fn remaining(&self) -> usize {
-        self.data.len() - self.pos
-    }
-
     pub(crate) fn is_empty(&self) -> bool {
         self.pos >= self.data.len()
     }

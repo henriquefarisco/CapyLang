@@ -141,10 +141,7 @@ fn ok_direct_call() {
         instructions: vec![
             Instruction::LoadConst(0),
             Instruction::LoadConst(1),
-            Instruction::Call {
-                fn_idx: 0,
-                argc: 2,
-            },
+            Instruction::Call { fn_idx: 0, argc: 2 },
             Instruction::Return,
         ],
         locals_count: 0,
@@ -337,10 +334,7 @@ fn b0019_unknown_function_index() {
     run(&Golden {
         name: "b0019_unknown_function_index",
         instructions: vec![
-            Instruction::Call {
-                fn_idx: 5,
-                argc: 0,
-            },
+            Instruction::Call { fn_idx: 5, argc: 0 },
             Instruction::Return,
         ],
         locals_count: 0,
@@ -356,10 +350,7 @@ fn b0020_call_arity_overflow() {
         name: "b0020_call_arity_overflow",
         instructions: vec![
             Instruction::LoadConst(0),
-            Instruction::Call {
-                fn_idx: 0,
-                argc: 1,
-            },
+            Instruction::Call { fn_idx: 0, argc: 1 },
             Instruction::Return,
         ],
         locals_count: 0,

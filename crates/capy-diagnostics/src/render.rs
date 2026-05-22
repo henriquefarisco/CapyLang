@@ -94,8 +94,9 @@ fn write_label(out: &mut String, map: &SourceMap<'_>, gutter: usize, label: &Lab
         }
     }
     match &label.message {
-        Some(msg) => writeln!(out, "{} | {} {}", " ".repeat(gutter), caret, msg)
-            .expect("infallible"),
+        Some(msg) => {
+            writeln!(out, "{} | {} {}", " ".repeat(gutter), caret, msg).expect("infallible")
+        }
         None => writeln!(out, "{} | {}", " ".repeat(gutter), caret).expect("infallible"),
     }
 }
@@ -200,12 +201,8 @@ mod tests {
     #[test]
     fn renders_span_on_second_line() {
         let source = "let x = 1;\nlet y = ;\n";
-        let diag = Diagnostic::error(
-            Code("P0001"),
-            "unexpected token",
-            Span::new(19, 20),
-        )
-        .with_label_message("expected expression");
+        let diag = Diagnostic::error(Code("P0001"), "unexpected token", Span::new(19, 20))
+            .with_label_message("expected expression");
         let out = render(&diag, source, "<input>");
         let expected = concat!(
             "error[P0001]: unexpected token\n",

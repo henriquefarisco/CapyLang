@@ -141,10 +141,7 @@ mod tests {
         let mut bytes = m.serialize();
         bytes.pop(); // drop the last byte
         let err = Module::parse(&bytes).unwrap_err();
-        assert!(matches!(
-            err,
-            BytecodeError::BodyLengthMismatch { .. }
-        ));
+        assert!(matches!(err, BytecodeError::BodyLengthMismatch { .. }));
     }
 
     #[test]
@@ -165,10 +162,7 @@ mod tests {
 
     #[test]
     fn deterministic_serialisation() {
-        let m = Module::new(
-            0,
-            vec![Section::new(SectionTag::Consts, vec![1, 2, 3])],
-        );
+        let m = Module::new(0, vec![Section::new(SectionTag::Consts, vec![1, 2, 3])]);
         let a = m.serialize();
         let b = m.serialize();
         assert_eq!(a, b);

@@ -144,7 +144,10 @@ mod tests {
     #[test]
     fn rejects_short_input() {
         let err = Header::parse(&[0u8; 10]).unwrap_err();
-        assert!(matches!(err, BytecodeError::TruncatedHeader { available: 10 }));
+        assert!(matches!(
+            err,
+            BytecodeError::TruncatedHeader { available: 10 }
+        ));
     }
 
     #[test]
@@ -177,7 +180,10 @@ mod tests {
         // flags is at offset 8..12.
         bytes[8] = 1;
         let err = Header::parse(&bytes).unwrap_err();
-        assert!(matches!(err, BytecodeError::ReservedFlagsNonZero { found: 1 }));
+        assert!(matches!(
+            err,
+            BytecodeError::ReservedFlagsNonZero { found: 1 }
+        ));
     }
 
     #[test]

@@ -129,7 +129,7 @@ fn cmd_tokens(args: &[String]) -> Result<ExitCode, String> {
     let path = take_path_arg(args)?;
     let source = read_source(&path)?;
     let lex = tokenize(&source);
-    let dump = dump_tokens(&lex);
+    let dump = dump_tokens(&source, &lex);
     print_with_optional_newline(&dump);
     Ok(if lex.diagnostics.is_empty() {
         ExitCode::SUCCESS
@@ -231,13 +231,15 @@ fn cmd_disasm(args: &[String]) -> Result<ExitCode, String> {
     let _ = writeln!(
         out,
         "; capyc {VERSION} disassembly\n; bc_version={} abi_version={} sections={}",
-        0, module.abi_version, module.sections.len()
+        0,
+        module.abi_version,
+        module.sections.len()
     );
     for s in &module.sections {
         match s.tag {
             SectionTag::Consts => {
-                let pool = ConstPool::decode(&s.payload)
-                    .map_err(|e| format!("constants section: {e}"))?;
+                let pool =
+                    ConstPool::decode(&s.payload).map_err(|e| format!("constants section: {e}"))?;
                 writeln!(out, "\nconstants ({} entries)", pool.entries.len()).ok();
                 for (i, c) in pool.entries.iter().enumerate() {
                     writeln!(out, "  {i:>4}  {c:?}").ok();
@@ -248,12 +250,7 @@ fn cmd_disasm(args: &[String]) -> Result<ExitCode, String> {
                     .map_err(|e| format!("functions section: {e}"))?;
                 writeln!(out, "\nfunctions ({} entries)", table.entries.len()).ok();
                 for (i, f) in table.entries.iter().enumerate() {
-                    writeln!(
-                        out,
-                        "  fn {i}  {:?}  locals={}",
-                        f.name, f.locals_count
-                    )
-                    .ok();
+                    writeln!(out, "  fn {i}  {:?}  locals={}", f.name, f.locals_count).ok();
                     match decode(&f.code) {
                         Ok(ins) => {
                             for line in disassemble_text(&ins).lines() {
@@ -267,8 +264,8 @@ fn cmd_disasm(args: &[String]) -> Result<ExitCode, String> {
                 }
             }
             SectionTag::Imports => {
-                let table = ImportTable::decode(&s.payload)
-                    .map_err(|e| format!("imports section: {e}"))?;
+                let table =
+                    ImportTable::decode(&s.payload).map_err(|e| format!("imports section: {e}"))?;
                 writeln!(out, "\nimports ({} entries)", table.entries.len()).ok();
                 for (i, im) in table.entries.iter().enumerate() {
                     writeln!(out, "  {i:>4}  {}::{}", im.module, im.symbol).ok();
@@ -339,8 +336,8 @@ fn cmd_run(args: &[String]) -> Result<ExitCode, String> {
         raw
     } else {
         // Treat as source: parse + emit in memory.
-        let source = String::from_utf8(raw)
-            .map_err(|e| format!("source is not valid UTF-8: {e}"))?;
+        let source =
+            String::from_utf8(raw).map_err(|e| format!("source is not valid UTF-8: {e}"))?;
         let parsed = parse_source(&source);
         if !parsed.diagnostics.is_empty() {
             for d in &parsed.diagnostics {

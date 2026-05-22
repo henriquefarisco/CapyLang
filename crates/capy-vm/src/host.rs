@@ -142,10 +142,7 @@ mod tests {
         let now = a.lookup("time", "now").expect("time::now registered");
         assert_eq!(now(&[]).unwrap(), Value::Int(0));
         let info = a.lookup("log", "info").expect("log::info registered");
-        assert_eq!(
-            info(&[Value::Str("hello".into())]).unwrap(),
-            Value::None
-        );
+        assert_eq!(info(&[Value::Str("hello".into())]).unwrap(), Value::None);
     }
 
     #[test]

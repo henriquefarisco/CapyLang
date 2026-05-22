@@ -59,33 +59,25 @@ impl DebugInfo {
     /// Parses the `Debug` section payload.
     pub fn decode(input: &[u8]) -> Result<Self, BytecodeError> {
         let mut cursor = Cursor::new(input);
-        let count = cursor
-            .read_u32_le()
-            .ok_or(BytecodeError::MalformedDebug {
-                offset: cursor.pos(),
-                reason: "truncated count",
-            })? as usize;
+        let count = cursor.read_u32_le().ok_or(BytecodeError::MalformedDebug {
+            offset: cursor.pos(),
+            reason: "truncated count",
+        })? as usize;
         let mut entries = Vec::with_capacity(count);
         for _ in 0..count {
-            let bytecode_offset = cursor
-                .read_u32_le()
-                .ok_or(BytecodeError::MalformedDebug {
-                    offset: cursor.pos(),
-                    reason: "truncated bytecode_offset",
-                })?;
-            let source_start = cursor
-                .read_u32_le()
-                .ok_or(BytecodeError::MalformedDebug {
-                    offset: cursor.pos(),
-                    reason: "truncated source_start",
-                })?;
+            let bytecode_offset = cursor.read_u32_le().ok_or(BytecodeError::MalformedDebug {
+                offset: cursor.pos(),
+                reason: "truncated bytecode_offset",
+            })?;
+            let source_start = cursor.read_u32_le().ok_or(BytecodeError::MalformedDebug {
+                offset: cursor.pos(),
+                reason: "truncated source_start",
+            })?;
             let source_end_pos = cursor.pos();
-            let source_end = cursor
-                .read_u32_le()
-                .ok_or(BytecodeError::MalformedDebug {
-                    offset: source_end_pos,
-                    reason: "truncated source_end",
-                })?;
+            let source_end = cursor.read_u32_le().ok_or(BytecodeError::MalformedDebug {
+                offset: source_end_pos,
+                reason: "truncated source_end",
+            })?;
             if source_end < source_start {
                 return Err(BytecodeError::MalformedDebug {
                     offset: source_end_pos,

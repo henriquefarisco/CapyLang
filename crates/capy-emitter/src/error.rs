@@ -174,8 +174,7 @@ impl EmitError {
                 "expression contains a parser-error placeholder".to_string()
             }
             EmitErrorKind::TopLevelMustBeItem => {
-                "top-level statement must be a fn/import/struct/const/type/enum item"
-                    .to_string()
+                "top-level statement must be a fn/import/struct/const/type/enum item".to_string()
             }
             EmitErrorKind::NestedItem => {
                 "items can only appear at the top level of a source unit".to_string()
@@ -199,9 +198,7 @@ impl EmitError {
                 format!("call passes {count} arguments, exceeds the v0 limit")
             }
             EmitErrorKind::DuplicateImport { name } => {
-                format!(
-                    "two `import` items resolve to the same callable name `{name}`"
-                )
+                format!("two `import` items resolve to the same callable name `{name}`")
             }
         }
     }

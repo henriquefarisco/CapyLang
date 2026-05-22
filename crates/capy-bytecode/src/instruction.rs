@@ -52,7 +52,10 @@ pub enum Instruction {
     /// `locals[0..argc]` (slot `0` = first argument, slot `argc-1` =
     /// last argument). The callee's remaining local slots (if any) are
     /// initialised to `None`.
-    Call { fn_idx: u32, argc: u32 },
+    Call {
+        fn_idx: u32,
+        argc: u32,
+    },
     Return,
     /// Call out into the host adapter.
     ///
@@ -61,7 +64,10 @@ pub enum Instruction {
     /// operand stack and passed to the registered host function. The
     /// host returns exactly one value, which is pushed back onto the
     /// operand stack. Stack-effect: pops `argc`, pushes 1.
-    HostCall { import_idx: u32, argc: u32 },
+    HostCall {
+        import_idx: u32,
+        argc: u32,
+    },
 }
 
 impl Instruction {
@@ -147,10 +153,12 @@ pub fn decode(code: &[u8]) -> Result<Vec<Instruction>, BytecodeError> {
     let mut out = Vec::new();
     while !cursor.is_empty() {
         let op_pos = cursor.pos();
-        let byte = cursor.read_u8().ok_or(BytecodeError::MalformedInstruction {
-            offset: op_pos,
-            reason: "truncated opcode",
-        })?;
+        let byte = cursor
+            .read_u8()
+            .ok_or(BytecodeError::MalformedInstruction {
+                offset: op_pos,
+                reason: "truncated opcode",
+            })?;
         let op = Opcode::from_byte(byte).ok_or(BytecodeError::MalformedInstruction {
             offset: op_pos,
             reason: "unknown opcode",
@@ -284,10 +292,7 @@ mod tests {
             Instruction::Not,
             Instruction::Jump(-4),
             Instruction::JumpIfFalse(8),
-            Instruction::Call {
-                fn_idx: 7,
-                argc: 2,
-            },
+            Instruction::Call { fn_idx: 7, argc: 2 },
             Instruction::Return,
             Instruction::HostCall {
                 import_idx: 3,
@@ -313,7 +318,7 @@ mod tests {
             bytes,
             vec![
                 0x10, 0, 0, 0, 0, // LoadConst 0
-                0x10, 1, 0, 0, 0, // LoadConst 1
+                0x10, 1, 0, 0, 0,    // LoadConst 1
                 0x30, // Add
                 0x81, // Return
             ]
@@ -387,18 +392,12 @@ mod tests {
     #[test]
     fn call_round_trips_with_two_u32_immediates() {
         let stream = vec![
-            Instruction::Call {
-                fn_idx: 3,
-                argc: 2,
-            },
+            Instruction::Call { fn_idx: 3, argc: 2 },
             Instruction::Return,
         ];
         let bytes = encode(&stream);
         // 0x80, fn_idx=3 LE, argc=2 LE, 0x81
-        assert_eq!(
-            bytes,
-            vec![0x80, 3, 0, 0, 0, 2, 0, 0, 0, 0x81]
-        );
+        assert_eq!(bytes, vec![0x80, 3, 0, 0, 0, 2, 0, 0, 0, 0x81]);
         let parsed = decode(&bytes).unwrap();
         assert_eq!(parsed, stream);
     }
@@ -417,10 +416,7 @@ mod tests {
 
     #[test]
     fn disassemble_text_renders_call() {
-        let stream = vec![Instruction::Call {
-            fn_idx: 5,
-            argc: 3,
-        }];
+        let stream = vec![Instruction::Call { fn_idx: 5, argc: 3 }];
         let text = disassemble_text(&stream);
         assert_eq!(text, "0000  call  5, 3\n");
     }

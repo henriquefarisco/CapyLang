@@ -358,8 +358,7 @@ fn imported_call_runs_through_host_adapter() {
 #[test]
 fn import_alias_lets_source_use_local_name() {
     // The host adapter only sees (module="log", symbol="info").
-    let src =
-        "import log::info as say;\nfn main() { say(\"hello\") }\n";
+    let src = "import log::info as say;\nfn main() { say(\"hello\") }\n";
     let result = run_source_with_host(src, HostAdapter::with_builtin_stubs()).unwrap();
     assert_eq!(result, Value::None);
 }
@@ -468,9 +467,7 @@ fn match_exclusive_range_pattern_excludes_upper_bound() {
 fn match_or_pattern_matches_any_alternative() {
     // Each of the three alts should select the same arm body.
     for scrut in [1, 2, 3] {
-        let src = format!(
-            "fn main() {{ match {scrut} {{ 1 | 2 | 3 => 100, _ => 0 }} }}\n"
-        );
+        let src = format!("fn main() {{ match {scrut} {{ 1 | 2 | 3 => 100, _ => 0 }} }}\n");
         assert_eq!(run_source(&src).unwrap(), Value::Int(100), "scrut={scrut}");
     }
     // A scrutinee not in the alt set falls through to the wildcard.

@@ -41,10 +41,7 @@ fn simple_arithmetic_tail_returns_value() {
     let out = emit(&parsed.source);
     assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
     let (_table, consts, ins) = decode_first_fn(&out.module);
-    assert_eq!(
-        consts.entries,
-        vec![Constant::Int(1), Constant::Int(2)]
-    );
+    assert_eq!(consts.entries, vec![Constant::Int(1), Constant::Int(2)]);
     assert_eq!(
         ins,
         vec![
@@ -372,13 +369,7 @@ fn call_to_known_fn_emits_call_with_correct_argc_and_fn_idx() {
     // load_const 0 (1); load_const 1 (2); call 0, 2; return
     assert_eq!(main_ins[0], Instruction::LoadConst(0));
     assert_eq!(main_ins[1], Instruction::LoadConst(1));
-    assert_eq!(
-        main_ins[2],
-        Instruction::Call {
-            fn_idx: 0,
-            argc: 2,
-        }
-    );
+    assert_eq!(main_ins[2], Instruction::Call { fn_idx: 0, argc: 2 });
     assert_eq!(main_ins[3], Instruction::Return);
 }
 
@@ -392,13 +383,7 @@ fn forward_call_resolves_via_two_pass_index_build() {
     assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
     let table = decode_fn_table(&out.module);
     let main_ins = decode(&table.entries[0].code).unwrap();
-    assert_eq!(
-        main_ins[0],
-        Instruction::Call {
-            fn_idx: 1,
-            argc: 0,
-        }
-    );
+    assert_eq!(main_ins[0], Instruction::Call { fn_idx: 1, argc: 0 });
 }
 
 #[test]
@@ -525,9 +510,7 @@ fn imported_call_lowers_to_host_call() {
 #[test]
 fn imported_call_with_args_forwards_argc() {
     // Arguments are pushed left-to-right; argc matches the source.
-    let parsed = parse_source(
-        "import log::info;\nfn main() { info(\"hi\") }\n",
-    );
+    let parsed = parse_source("import log::info;\nfn main() { info(\"hi\") }\n");
     let out = emit(&parsed.source);
     assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
     let (_table, consts, ins) = decode_first_fn(&out.module);
@@ -550,9 +533,7 @@ fn import_alias_renames_callable_but_keeps_wire_symbol() {
     // `import log::info as say` lets the source say `say("hi")`
     // while the bytecode `Imports` section still binds against
     // (module="log", symbol="info").
-    let parsed = parse_source(
-        "import log::info as say;\nfn main() { say(\"hi\") }\n",
-    );
+    let parsed = parse_source("import log::info as say;\nfn main() { say(\"hi\") }\n");
     let out = emit(&parsed.source);
     assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
     let (_table, _consts, ins) = decode_first_fn(&out.module);
@@ -581,9 +562,7 @@ fn local_fn_shadows_import_of_same_name() {
     // `foo()` lowers to `Call`, not `HostCall`. The import is still
     // emitted into the `Imports` section so the host bridge surface
     // remains observable to tooling.
-    let parsed = parse_source(
-        "import x::foo;\nfn foo() {}\nfn main() { foo() }\n",
-    );
+    let parsed = parse_source("import x::foo;\nfn foo() {}\nfn main() { foo() }\n");
     let out = emit(&parsed.source);
     assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
     let consts_section = out
@@ -599,8 +578,7 @@ fn local_fn_shadows_import_of_same_name() {
         .iter()
         .find(|s| s.tag == SectionTag::Functions)
         .expect("functions section");
-    let functions =
-        FunctionTable::decode(&functions_section.payload).expect("decode functions");
+    let functions = FunctionTable::decode(&functions_section.payload).expect("decode functions");
     let main_idx = functions
         .entries
         .iter()
@@ -728,9 +706,7 @@ fn match_ident_pattern_binds_and_uses_in_body() {
 fn match_guard_branches_to_next_arm() {
     // `match 3 { n if n > 0 => 1, _ => 0 }` should evaluate the guard
     // after binding `n`; a falsy guard must skip to the next arm.
-    let parsed = parse_source(
-        "fn main() { match 3 { n if n > 0 => 1, _ => 0 } }\n",
-    );
+    let parsed = parse_source("fn main() { match 3 { n if n > 0 => 1, _ => 0 } }\n");
     let out = emit(&parsed.source);
     assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
     let (_table, _consts, ins) = decode_first_fn(&out.module);
@@ -748,7 +724,10 @@ fn match_guard_branches_to_next_arm() {
     }
     // Arm 1 contributes 1 JumpIfFalse (guard); arm 0 contributes 0
     // because Ident never tests. Both arms contribute 1 Jump to end.
-    assert!(jif_count >= 1, "expected at least one JumpIfFalse for the guard");
+    assert!(
+        jif_count >= 1,
+        "expected at least one JumpIfFalse for the guard"
+    );
     assert!(jmp_count >= 2, "expected one Jump-to-end per arm");
 }
 
@@ -758,9 +737,7 @@ fn match_arm_bindings_do_not_leak_across_arms() {
     // emitter restores the locals map; arm 1's `n` therefore gets a
     // fresh slot rather than tripping `DuplicateLocal`. The emit
     // pipeline must succeed without errors.
-    let parsed = parse_source(
-        "fn main() { match 1 { n => n, n => n } }\n",
-    );
+    let parsed = parse_source("fn main() { match 1 { n => n, n => n } }\n");
     let out = emit(&parsed.source);
     assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
 }
@@ -771,9 +748,7 @@ fn match_unsupported_pattern_emits_typed_error() {
     // emitter reports a `UnsupportedFeature` with a span pointing at
     // the pattern. (Range and or-patterns are now supported and have
     // their own positive tests below.)
-    let parsed = parse_source(
-        "fn main() { match 1 { Point { x } => x, _ => 0 } }\n",
-    );
+    let parsed = parse_source("fn main() { match 1 { Point { x } => x, _ => 0 } }\n");
     let out = emit(&parsed.source);
     assert!(!out.errors.is_empty());
     assert!(out.errors.iter().any(|e| matches!(

@@ -410,7 +410,9 @@ fn write_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::Continue { .. } => {
             out.push_str(" Continue\n");
         }
-        Expr::Match { scrutinee, arms, .. } => {
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
             out.push_str(" Match\n");
             write_indent(out, depth + 1);
             out.push_str("Scrutinee\n");

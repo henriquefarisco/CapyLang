@@ -50,10 +50,7 @@ pub enum BytecodeError {
     /// Reserved `flags` field was non-zero in a v0 container.
     ReservedFlagsNonZero { found: u32 },
     /// Body bytes available do not match the declared `body_length`.
-    BodyLengthMismatch {
-        declared: u32,
-        actual: usize,
-    },
+    BodyLengthMismatch { declared: u32, actual: usize },
     /// BLAKE3-128 checksum did not match the body bytes.
     ChecksumMismatch {
         declared: [u8; 16],
@@ -61,38 +58,20 @@ pub enum BytecodeError {
     },
     /// A section had an unknown tag, a truncated header or a payload
     /// length that overflowed the body.
-    MalformedSection {
-        offset: usize,
-        reason: &'static str,
-    },
+    MalformedSection { offset: usize, reason: &'static str },
     /// The input did not contain the full 32-byte header.
     TruncatedHeader { available: usize },
     /// Constant-pool section payload is malformed.
-    MalformedConstants {
-        offset: usize,
-        reason: &'static str,
-    },
+    MalformedConstants { offset: usize, reason: &'static str },
     /// Function-table section payload is malformed.
-    MalformedFunctions {
-        offset: usize,
-        reason: &'static str,
-    },
+    MalformedFunctions { offset: usize, reason: &'static str },
     /// Import-table section payload is malformed.
-    MalformedImports {
-        offset: usize,
-        reason: &'static str,
-    },
+    MalformedImports { offset: usize, reason: &'static str },
     /// Debug-info section payload is malformed.
-    MalformedDebug {
-        offset: usize,
-        reason: &'static str,
-    },
+    MalformedDebug { offset: usize, reason: &'static str },
     /// Instruction stream inside a function is malformed (unknown opcode
     /// or truncated immediate).
-    MalformedInstruction {
-        offset: usize,
-        reason: &'static str,
-    },
+    MalformedInstruction { offset: usize, reason: &'static str },
 }
 
 impl BytecodeError {
@@ -190,9 +169,7 @@ mod tests {
 
     #[test]
     fn display_includes_stable_code_prefix() {
-        let e = BytecodeError::MagicMismatch {
-            found: *b"NOPE",
-        };
+        let e = BytecodeError::MagicMismatch { found: *b"NOPE" };
         let s = format!("{e}");
         assert!(s.starts_with("[B0001]"), "got {s:?}");
     }

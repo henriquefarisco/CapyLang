@@ -135,10 +135,8 @@ impl ModuleEmitter {
             match stmt {
                 Stmt::Item(item) => self.emit_item(item),
                 Stmt::Let { span, .. } | Stmt::Expr { span, .. } => {
-                    self.errors.push(EmitError::new(
-                        EmitErrorKind::TopLevelMustBeItem,
-                        *span,
-                    ));
+                    self.errors
+                        .push(EmitError::new(EmitErrorKind::TopLevelMustBeItem, *span));
                 }
             }
         }
@@ -184,8 +182,7 @@ impl ModuleEmitter {
             return;
         }
         self.emitted.insert(fn_idx);
-        let mut fe =
-            FunctionEmitter::new(&mut self.consts, &self.fn_index, &self.import_index);
+        let mut fe = FunctionEmitter::new(&mut self.consts, &self.fn_index, &self.import_index);
         // Register parameters as the first locals, in declaration order.
         // `locals[0]` corresponds to the first parameter, matching the
         // `Call` ABI in `docs/bytecode-v0.md`.
@@ -236,7 +233,11 @@ impl ModuleEmitter {
     /// surface stays decoupled from local renaming.
     fn collect_import(&mut self, i: &capy_ast::ImportItem) {
         let (module, symbol, default_name) = if i.path.len() == 1 {
-            (String::new(), i.path[0].name.clone(), i.path[0].name.clone())
+            (
+                String::new(),
+                i.path[0].name.clone(),
+                i.path[0].name.clone(),
+            )
         } else {
             let last_idx = i.path.len() - 1;
             let module_parts: Vec<&str> =
@@ -565,12 +566,7 @@ impl<'a> FunctionEmitter<'a> {
         match expr {
             Expr::Int { text, span } => {
                 let v = parse_int_literal(text).ok_or_else(|| {
-                    EmitError::new(
-                        EmitErrorKind::IntegerParse {
-                            text: text.clone(),
-                        },
-                        *span,
-                    )
+                    EmitError::new(EmitErrorKind::IntegerParse { text: text.clone() }, *span)
                 })?;
                 let idx = self.consts.intern_int(v);
                 self.emit_op(Opcode::LoadConst);
@@ -578,12 +574,7 @@ impl<'a> FunctionEmitter<'a> {
             }
             Expr::Float { text, span } => {
                 let v = parse_float_literal(text).ok_or_else(|| {
-                    EmitError::new(
-                        EmitErrorKind::FloatParse {
-                            text: text.clone(),
-                        },
-                        *span,
-                    )
+                    EmitError::new(EmitErrorKind::FloatParse { text: text.clone() }, *span)
                 })?;
                 let idx = self.consts.intern_float(v);
                 self.emit_op(Opcode::LoadConst);
@@ -665,18 +656,14 @@ impl<'a> FunctionEmitter<'a> {
     }
 
     fn emit_ident_load(&mut self, id: &Ident) -> Result<(), EmitError> {
-        let idx = self
-            .locals
-            .get(&id.name)
-            .copied()
-            .ok_or_else(|| {
-                EmitError::new(
-                    EmitErrorKind::UnknownLocal {
-                        name: id.name.clone(),
-                    },
-                    id.span,
-                )
-            })?;
+        let idx = self.locals.get(&id.name).copied().ok_or_else(|| {
+            EmitError::new(
+                EmitErrorKind::UnknownLocal {
+                    name: id.name.clone(),
+                },
+                id.span,
+            )
+        })?;
         self.emit_op(Opcode::LoadLocal);
         self.emit_u32(idx);
         Ok(())
@@ -703,11 +690,7 @@ impl<'a> FunctionEmitter<'a> {
             BinOp::Ge => Opcode::Ge,
             BinOp::And => return self.emit_and(lhs, rhs),
             BinOp::Or => return self.emit_or(lhs, rhs),
-            BinOp::BitAnd
-            | BinOp::BitOr
-            | BinOp::BitXor
-            | BinOp::Shl
-            | BinOp::Shr => {
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
                 return Err(EmitError::new(
                     EmitErrorKind::UnsupportedBinary { op: op.as_str() },
                     span,
@@ -734,7 +717,9 @@ impl<'a> FunctionEmitter<'a> {
 
     fn emit_stmt(&mut self, stmt: &Stmt) -> Result<(), EmitError> {
         match stmt {
-            Stmt::Let { name, init, span, .. } => {
+            Stmt::Let {
+                name, init, span, ..
+            } => {
                 if let Some(init) = init {
                     self.emit_expr(init)?;
                 } else {
@@ -1097,7 +1082,7 @@ impl<'a> FunctionEmitter<'a> {
         // Jump above with exactly one value pushed; the fall-through
         // pushes one via `LoadNone`.
         let _ = span; // currently informational; reserved for future
-                       // exhaustiveness diagnostics.
+                      // exhaustiveness diagnostics.
         self.emit_op(Opcode::LoadNone);
         self.mark_label(end_label);
         Ok(())
@@ -1226,9 +1211,7 @@ impl<'a> FunctionEmitter<'a> {
                 },
                 *span,
             )),
-            Pattern::Error { span } => {
-                Err(EmitError::new(EmitErrorKind::ParseErrorInExpr, *span))
-            }
+            Pattern::Error { span } => Err(EmitError::new(EmitErrorKind::ParseErrorInExpr, *span)),
         }
     }
 
@@ -1283,11 +1266,20 @@ impl<'a> FunctionEmitter<'a> {
 /// underscore separators) into an `i64`.
 fn parse_int_literal(text: &str) -> Option<i64> {
     let clean: String = text.chars().filter(|c| *c != '_').collect();
-    if let Some(rest) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
+    if let Some(rest) = clean
+        .strip_prefix("0x")
+        .or_else(|| clean.strip_prefix("0X"))
+    {
         i64::from_str_radix(rest, 16).ok()
-    } else if let Some(rest) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) {
+    } else if let Some(rest) = clean
+        .strip_prefix("0b")
+        .or_else(|| clean.strip_prefix("0B"))
+    {
         i64::from_str_radix(rest, 2).ok()
-    } else if let Some(rest) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) {
+    } else if let Some(rest) = clean
+        .strip_prefix("0o")
+        .or_else(|| clean.strip_prefix("0O"))
+    {
         i64::from_str_radix(rest, 8).ok()
     } else {
         clean.parse::<i64>().ok()
@@ -1357,7 +1349,7 @@ mod tests {
 
     #[test]
     fn parse_float_basic() {
-        assert_eq!(parse_float_literal("3.14"), Some(3.14));
+        assert_eq!(parse_float_literal("3.125"), Some(3.125));
         assert_eq!(parse_float_literal("1_000.5"), Some(1000.5));
         assert_eq!(parse_float_literal("1e9"), Some(1e9));
     }

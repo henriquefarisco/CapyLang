@@ -93,12 +93,10 @@ impl ConstPool {
         let mut entries = Vec::with_capacity(count);
         for _ in 0..count {
             let tag_pos = cursor.pos();
-            let tag = cursor
-                .read_u8()
-                .ok_or(BytecodeError::MalformedConstants {
-                    offset: tag_pos,
-                    reason: "truncated entry tag",
-                })?;
+            let tag = cursor.read_u8().ok_or(BytecodeError::MalformedConstants {
+                offset: tag_pos,
+                reason: "truncated entry tag",
+            })?;
             match tag {
                 CONST_TAG_INT => {
                     let v = cursor
@@ -127,12 +125,13 @@ impl ConstPool {
                             reason: "truncated Str length",
                         })? as usize;
                     let bytes_pos = cursor.pos();
-                    let bytes = cursor
-                        .read_bytes(len)
-                        .ok_or(BytecodeError::MalformedConstants {
-                            offset: bytes_pos,
-                            reason: "truncated Str bytes",
-                        })?;
+                    let bytes =
+                        cursor
+                            .read_bytes(len)
+                            .ok_or(BytecodeError::MalformedConstants {
+                                offset: bytes_pos,
+                                reason: "truncated Str bytes",
+                            })?;
                     let s = std::str::from_utf8(bytes).map_err(|_| {
                         BytecodeError::MalformedConstants {
                             offset: bytes_pos,
@@ -176,7 +175,7 @@ mod tests {
         let pool = ConstPool {
             entries: vec![
                 Constant::Int(-42),
-                Constant::Float(3.14),
+                Constant::Float(3.125),
                 Constant::Str("hello, café".to_string()),
             ],
         };

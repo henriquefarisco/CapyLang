@@ -32,10 +32,7 @@ mod tests {
     #[test]
     fn empty_input_matches_reference() {
         let got = compute_checksum(b"");
-        assert_eq!(
-            hex(&got),
-            "af1349b9f5f9a1a6a0404dea36dcc949"
-        );
+        assert_eq!(hex(&got), "af1349b9f5f9a1a6a0404dea36dcc949");
     }
 
     #[test]

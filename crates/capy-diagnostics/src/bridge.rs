@@ -75,7 +75,11 @@ pub fn from_parse(diagnostic: &ParseDiagnostic) -> Diagnostic {
 /// `EmitError::span` from the offending AST node.
 #[must_use]
 pub fn from_emit(diagnostic: &EmitError) -> Diagnostic {
-    Diagnostic::error(Code(diagnostic.code()), diagnostic.message(), diagnostic.span)
+    Diagnostic::error(
+        Code(diagnostic.code()),
+        diagnostic.message(),
+        diagnostic.span,
+    )
 }
 
 /// Converts a [`VmError`] into the unified [`Diagnostic`] shape.
@@ -198,10 +202,7 @@ mod tests {
         assert_eq!(diag.code, P_UNEXPECTED_TOKEN);
         assert!(diag.message.contains("Semicolon"));
         assert!(diag.message.contains("expression"));
-        assert_eq!(
-            diag.primary.message.as_deref(),
-            Some("expected expression")
-        );
+        assert_eq!(diag.primary.message.as_deref(), Some("expected expression"));
     }
 
     #[test]
@@ -398,10 +399,7 @@ mod tests {
     #[test]
     fn vm_error_pc_accessor_round_trip() {
         // Sanity check the new VmError::pc accessor used by the bridge.
-        assert_eq!(
-            VmError::StackUnderflow { pc: 0x10 }.pc(),
-            Some(0x10)
-        );
+        assert_eq!(VmError::StackUnderflow { pc: 0x10 }.pc(), Some(0x10));
         assert!(VmError::BudgetExhausted { budget: 0 }.pc().is_none());
         assert!(VmError::UnknownFunction {
             name: "x".to_string()

@@ -39,7 +39,7 @@ mod section;
 mod verify;
 
 pub use checksum::{compute_checksum, Checksum, CHECKSUM_SIZE};
-pub use consts::{Constant, ConstPool};
+pub use consts::{ConstPool, Constant};
 pub use debug::{DebugEntry, DebugInfo};
 pub use error::{
     BytecodeError, B_BODY_LENGTH_MISMATCH, B_CHECKSUM_MISMATCH, B_MAGIC_MISMATCH,

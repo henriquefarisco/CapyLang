@@ -12,7 +12,7 @@ fn full_module_round_trip() {
     let consts = ConstPool {
         entries: vec![
             Constant::Int(42),
-            Constant::Float(3.14),
+            Constant::Float(3.125),
             Constant::Str("hello".to_string()),
         ],
     };

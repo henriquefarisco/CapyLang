@@ -159,7 +159,7 @@ impl<'a> Parser<'a> {
 
     fn expect_ident(&mut self, expected: &'static str) -> Ident {
         let tok = self.peek();
-        if tok.kind == TokenKind::Ident {
+        if matches!(tok.kind, TokenKind::Ident | TokenKind::SomeKw) {
             self.advance();
             return Ident {
                 name: self.lexeme(tok.span).to_string(),
@@ -722,14 +722,16 @@ impl<'a> Parser<'a> {
             | TokenKind::False
             | TokenKind::NoneKw
             | TokenKind::Minus => self.parse_literal_pattern(),
-            TokenKind::Ident => self.parse_ident_pattern(),
+            TokenKind::Ident | TokenKind::SomeKw => self.parse_ident_pattern(),
             TokenKind::Error => {
                 self.advance();
                 Pattern::Error { span: tok.span }
             }
             TokenKind::Eof => {
                 self.error(
-                    ParseErrorKind::UnexpectedEof { expected: "pattern" },
+                    ParseErrorKind::UnexpectedEof {
+                        expected: "pattern",
+                    },
                     tok.span,
                 );
                 Pattern::Error { span: tok.span }
@@ -973,8 +975,8 @@ impl<'a> Parser<'a> {
     /// `span.start`) rather than as a dedicated lexer token.
     fn parse_range_pattern_after_lo(&mut self, lo: Pattern) -> Pattern {
         let dotdot_tok = self.advance();
-        let inclusive = self.peek().kind == TokenKind::Eq
-            && self.peek().span.start == dotdot_tok.span.end;
+        let inclusive =
+            self.peek().kind == TokenKind::Eq && self.peek().span.start == dotdot_tok.span.end;
         if inclusive {
             self.advance();
         }
@@ -1420,13 +1422,7 @@ mod tests {
         assert!(r.diagnostics.is_empty());
         if let Expr::Binary { op, rhs, .. } = &r.expr {
             assert_eq!(*op, BinOp::Add);
-            assert!(matches!(
-                rhs.as_ref(),
-                Expr::Binary {
-                    op: BinOp::Mul,
-                    ..
-                }
-            ));
+            assert!(matches!(rhs.as_ref(), Expr::Binary { op: BinOp::Mul, .. }));
         } else {
             panic!("expected Binary, got {:?}", r.expr);
         }
@@ -1438,13 +1434,7 @@ mod tests {
         assert!(r.diagnostics.is_empty());
         // ((1 - 2) - 3)
         if let Expr::Binary { lhs, .. } = &r.expr {
-            assert!(matches!(
-                lhs.as_ref(),
-                Expr::Binary {
-                    op: BinOp::Sub,
-                    ..
-                }
-            ));
+            assert!(matches!(lhs.as_ref(), Expr::Binary { op: BinOp::Sub, .. }));
         } else {
             panic!("expected Binary, got {:?}", r.expr);
         }
@@ -1498,10 +1488,10 @@ mod tests {
     #[test]
     fn lex_error_surfaces_as_parse_diagnostic() {
         let r = parse_expr("\"oops");
-        assert!(r.diagnostics.iter().any(|d| matches!(
-            d.kind,
-            crate::diagnostic::ParseErrorKind::Lex(_)
-        )));
+        assert!(r
+            .diagnostics
+            .iter()
+            .any(|d| matches!(d.kind, crate::diagnostic::ParseErrorKind::Lex(_))));
     }
 
     #[test]
@@ -1729,9 +1719,7 @@ mod tests {
 
     #[test]
     fn items_and_stmts_interleave() {
-        let r = super::parse_source(
-            "const X: i32 = 1;\nlet y = X;\nfn f() {}\n",
-        );
+        let r = super::parse_source("const X: i32 = 1;\nlet y = X;\nfn f() {}\n");
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         assert_eq!(r.source.stmts.len(), 3);
     }
@@ -1767,9 +1755,7 @@ mod tests {
     #[test]
     fn enum_item_payload_variants() {
         // Tuple- and struct-like variants.
-        let r = super::parse_source(
-            "enum Shape { Circle(f64), Square { side: f64 }, Empty }\n",
-        );
+        let r = super::parse_source("enum Shape { Circle(f64), Square { side: f64 }, Empty }\n");
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         if let capy_ast::Stmt::Item(capy_ast::Item::Enum(e)) = &r.source.stmts[0] {
             assert_eq!(e.variants.len(), 3);
@@ -1819,7 +1805,10 @@ mod tests {
         assert!(!r.diagnostics.is_empty());
         assert!(r.diagnostics.iter().any(|d| matches!(
             d.kind,
-            crate::diagnostic::ParseErrorKind::UnexpectedToken { expected: "type", .. }
+            crate::diagnostic::ParseErrorKind::UnexpectedToken {
+                expected: "type",
+                ..
+            }
         )));
     }
 
@@ -1834,10 +1823,7 @@ mod tests {
             other => panic!("expected Match, got {other:?}"),
         };
         assert_eq!(arms.len(), 3);
-        assert!(matches!(
-            arms[0].pattern,
-            capy_ast::Pattern::Literal { .. }
-        ));
+        assert!(matches!(arms[0].pattern, capy_ast::Pattern::Literal { .. }));
         assert!(matches!(
             arms[2].pattern,
             capy_ast::Pattern::Wildcard { .. }
@@ -1882,10 +1868,7 @@ mod tests {
             ));
             // `None` is the `NoneLit` keyword token, so the second arm's
             // pattern is a literal pattern rather than a tuple-struct.
-            assert!(matches!(
-                arms[1].pattern,
-                capy_ast::Pattern::Literal { .. }
-            ));
+            assert!(matches!(arms[1].pattern, capy_ast::Pattern::Literal { .. }));
         } else {
             panic!("expected Match");
         }
@@ -1992,7 +1975,10 @@ mod tests {
         assert!(!r.diagnostics.is_empty());
         assert!(r.diagnostics.iter().any(|d| matches!(
             d.kind,
-            crate::diagnostic::ParseErrorKind::UnexpectedToken { expected: "`=>`", .. }
+            crate::diagnostic::ParseErrorKind::UnexpectedToken {
+                expected: "`=>`",
+                ..
+            }
         )));
     }
 
@@ -2003,10 +1989,7 @@ mod tests {
         let r = super::parse_source("match x { _ => 0 }\n");
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         assert_eq!(r.source.stmts.len(), 1);
-        if let capy_ast::Stmt::Expr {
-            has_semi, expr, ..
-        } = &r.source.stmts[0]
-        {
+        if let capy_ast::Stmt::Expr { has_semi, expr, .. } = &r.source.stmts[0] {
             assert!(!*has_semi);
             assert!(matches!(expr, Expr::Match { .. }));
         } else {

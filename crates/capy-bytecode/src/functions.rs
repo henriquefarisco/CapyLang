@@ -86,12 +86,13 @@ impl FunctionTable {
                     reason: "truncated code_len",
                 })? as usize;
             let code_pos = cursor.pos();
-            let code_bytes = cursor
-                .read_bytes(code_len)
-                .ok_or(BytecodeError::MalformedFunctions {
-                    offset: code_pos,
-                    reason: "truncated code bytes",
-                })?;
+            let code_bytes =
+                cursor
+                    .read_bytes(code_len)
+                    .ok_or(BytecodeError::MalformedFunctions {
+                        offset: code_pos,
+                        reason: "truncated code bytes",
+                    })?;
             entries.push(Function {
                 name,
                 locals_count,

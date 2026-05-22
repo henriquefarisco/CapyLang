@@ -86,17 +86,15 @@ impl Vm {
             code: e.code(),
         })?;
 
-        let consts = match module
-            .sections
-            .iter()
-            .find(|s| s.tag == SectionTag::Consts)
-        {
-            Some(section) => ConstPool::decode(&section.payload)
-                .map_err(|e| VmError::MalformedModule {
-                    reason: "constant pool payload invalid",
-                    code: e.code(),
-                })?
-                .entries,
+        let consts = match module.sections.iter().find(|s| s.tag == SectionTag::Consts) {
+            Some(section) => {
+                ConstPool::decode(&section.payload)
+                    .map_err(|e| VmError::MalformedModule {
+                        reason: "constant pool payload invalid",
+                        code: e.code(),
+                    })?
+                    .entries
+            }
             None => Vec::new(),
         };
 
@@ -105,12 +103,14 @@ impl Vm {
             .iter()
             .find(|s| s.tag == SectionTag::Imports)
         {
-            Some(section) => ImportTable::decode(&section.payload)
-                .map_err(|e| VmError::MalformedModule {
-                    reason: "import table payload invalid",
-                    code: e.code(),
-                })?
-                .entries,
+            Some(section) => {
+                ImportTable::decode(&section.payload)
+                    .map_err(|e| VmError::MalformedModule {
+                        reason: "import table payload invalid",
+                        code: e.code(),
+                    })?
+                    .entries
+            }
             None => Vec::new(),
         };
 
@@ -119,12 +119,12 @@ impl Vm {
             .iter()
             .find(|s| s.tag == SectionTag::Functions)
         {
-            Some(section) => FunctionTable::decode(&section.payload).map_err(|e| {
-                VmError::MalformedModule {
+            Some(section) => {
+                FunctionTable::decode(&section.payload).map_err(|e| VmError::MalformedModule {
                     reason: "function table payload invalid",
                     code: e.code(),
-                }
-            })?,
+                })?
+            }
             None => FunctionTable {
                 entries: Vec::new(),
             },
@@ -142,8 +142,7 @@ impl Vm {
         // stack-discipline contract before any instruction executes.
         // The verifier needs each callee's declared `locals_count`, so
         // we collect that once across the whole table.
-        let callee_locals_counts: Vec<u32> =
-            functions.iter().map(|f| f.locals_count).collect();
+        let callee_locals_counts: Vec<u32> = functions.iter().map(|f| f.locals_count).collect();
         for f in &functions {
             verify_function(&f.instructions, f.locals_count, &callee_locals_counts)
                 .map_err(verify_to_vm_error)?;
@@ -289,13 +288,16 @@ impl<'a> ExecState<'a> {
                 }
                 Instruction::StoreLocal(idx) => {
                     let v = self.pop(pc)?;
-                    let slot = self.cur.locals.get_mut(idx as usize).ok_or(
-                        VmError::LocalOutOfBounds {
-                            pc,
-                            index: idx,
-                            locals_count: self.cur.locals.len() as u32,
-                        },
-                    )?;
+                    let locals_count = self.cur.locals.len() as u32;
+                    let slot =
+                        self.cur
+                            .locals
+                            .get_mut(idx as usize)
+                            .ok_or(VmError::LocalOutOfBounds {
+                                pc,
+                                index: idx,
+                                locals_count,
+                            })?;
                     *slot = v;
                 }
                 Instruction::Add => self.binop_numeric(pc, "add", BinOp::Add)?,
@@ -438,13 +440,14 @@ impl<'a> ExecState<'a> {
                         return Err(VmError::StackUnderflow { pc });
                     }
                     let import = &self.imports[import_idx as usize];
-                    let handler = self.host.lookup(&import.module, &import.symbol).ok_or_else(
-                        || VmError::UnresolvedHostImport {
+                    let handler = self
+                        .host
+                        .lookup(&import.module, &import.symbol)
+                        .ok_or_else(|| VmError::UnresolvedHostImport {
                             pc,
                             module: import.module.clone(),
                             symbol: import.symbol.clone(),
-                        },
-                    )?;
+                        })?;
                     let split = self.stack.len() - argc as usize;
                     let args: Vec<Value> = self.stack.split_off(split);
                     match handler(&args) {
@@ -869,10 +872,7 @@ mod tests {
         // `from_module` time. The VM runtime never sees this
         // bytecode — surfaces as `MalformedModule { code: B0019 }`.
         let code = encode(&[
-            Instruction::Call {
-                fn_idx: 7,
-                argc: 0,
-            },
+            Instruction::Call { fn_idx: 7, argc: 0 },
             Instruction::Return,
         ]);
         let bytes = module_with(
@@ -897,10 +897,7 @@ mod tests {
         // verifier rejects at load time with `B0020`.
         let main_code = encode(&[
             Instruction::LoadConst(0),
-            Instruction::Call {
-                fn_idx: 1,
-                argc: 1,
-            },
+            Instruction::Call { fn_idx: 1, argc: 1 },
             Instruction::Return,
         ]);
         let helper_code = encode(&[Instruction::LoadNone, Instruction::Return]);
@@ -993,7 +990,9 @@ mod tests {
         );
         let vm = Vm::from_module_with_host(&bytes, HostAdapter::with_builtin_stubs()).unwrap();
         match vm.run("main").unwrap_err() {
-            VmError::UnknownHostImport { index, table_len, .. } => {
+            VmError::UnknownHostImport {
+                index, table_len, ..
+            } => {
                 assert_eq!(index, 5);
                 assert_eq!(table_len, 0);
             }
