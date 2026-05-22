@@ -233,14 +233,14 @@ pub fn verify_function(
 
         // Index validations that do not depend on the resulting depth.
         match ins {
-            Instruction::LoadLocal(slot) | Instruction::StoreLocal(slot) => {
-                if slot >= locals_count {
-                    return Err(VerifyError::LocalOutOfBounds {
-                        ins_index: i,
-                        slot,
-                        locals_count,
-                    });
-                }
+            Instruction::LoadLocal(slot) | Instruction::StoreLocal(slot)
+                if slot >= locals_count =>
+            {
+                return Err(VerifyError::LocalOutOfBounds {
+                    ins_index: i,
+                    slot,
+                    locals_count,
+                });
             }
             Instruction::Call { fn_idx, argc } => {
                 let table_len = callee_locals_counts.len() as u32;

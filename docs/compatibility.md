@@ -235,7 +235,7 @@ CapyLang does **not** own:
   `permissions`.
 - JIT is out of scope for the first integration wave. The VM
   interprets bytecode only.
-- The lexer (S1) is stable at v0.1.5; additive changes allowed
+- The lexer (S1) is stable at v0.1.6; additive changes allowed
   within minor versions; major changes require version bump and
   migration note.
 
