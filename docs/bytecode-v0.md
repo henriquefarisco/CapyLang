@@ -1,10 +1,11 @@
-# CapyLang bytecode v0 (specification placeholder)
+# CapyLang bytecode v0
 
-Status: pinned by slice S4 in the CapyLang roadmap. This document reserves
-the file path and fixes the **header** layout so external tooling and the
-CapyOS integration adapter (Etapa 15) can already validate magic, version
-and ABI fields. Opcodes, constant pool layout and verifier rules will be
-populated during S4 itself.
+Status: delivered by slices S4 (header), S4b (typed body sections),
+S5a (instruction set) and S5c (static stack-balance verifier), all
+implemented in the `capy-bytecode` crate. The **header** layout is frozen;
+external tooling and the CapyOS integration adapter (Etapa 15) can validate
+magic, version and ABI fields against this document. Opcodes, the constant
+pool layout and the verifier rules are specified below.
 
 Authoritative roadmap reference:
 `.windsurf/plans/capylang-roadmap-0c1ca5.md`
@@ -36,7 +37,7 @@ All multi-byte integers are little-endian.
 |     12 |    4 | `body_length`  | bytes of body following the header     |
 |     16 |   16 | `checksum`     | BLAKE3-128 of the body                 |
 
-## Body (drafted by S4, typed by S4b)
+## Body (framed by S4, typed by S4b)
 
 The body is divided into sections introduced by a 1-byte tag and a 4-byte
 length. The set of tags is fixed at v0 and additive within v0.x.
@@ -200,6 +201,26 @@ additive within v0; renaming or removing a code is a breaking change.
 | B0011 | `MalformedDebug`         | invalid debug info payload               |
 | B0012 | `MalformedInstruction`   | unknown opcode or truncated immediate    |
 
+### Verifier error codes (S5c)
+
+The static stack-balance verifier (`capy-bytecode`'s `verify_function`,
+run by the VM at load time via `Vm::from_module`) rejects any function
+whose operand-stack discipline cannot be proven. Its failures use the same
+`B<NNNN>` family but are surfaced through the VM as
+`VmError::MalformedModule` carrying the verifier's stable code, rather than
+by the container loader above. The catalogue is additive within v0.
+
+| Code  | Constant                            | Description                                          |
+|------:|-------------------------------------|------------------------------------------------------|
+| B0013 | `B_VERIFIER_STACK_UNDERFLOW`        | an opcode pops more operands than the stack provides |
+| B0014 | `B_VERIFIER_STACK_INCONSISTENCY`    | two predecessors disagree on operand-stack depth     |
+| B0015 | `B_VERIFIER_FALL_OFF_END`           | a reachable path ends without a terminating `return` |
+| B0016 | `B_VERIFIER_INVALID_RETURN_DEPTH`   | `return` reached with operand-stack depth not exactly 1 |
+| B0017 | `B_VERIFIER_LOCAL_OUT_OF_BOUNDS`    | `load_local` / `store_local` slot ≥ `locals_count`   |
+| B0018 | `B_VERIFIER_JUMP_OUT_OF_BOUNDS`     | `jump` / `jump_if_false` target off an instruction boundary |
+| B0019 | `B_VERIFIER_UNKNOWN_FUNCTION_INDEX` | `call` references an out-of-range function index     |
+| B0020 | `B_VERIFIER_CALL_ARITY_OVERFLOW`    | `call` `argc` exceeds the callee's `locals_count`    |
+
 ## Security invariants (cannot regress)
 
 The following constraints are duplicated here from
@@ -212,9 +233,16 @@ The following constraints are duplicated here from
 - instruction/time budget per frame or command;
 - all host resources represented by opaque handles.
 
-## Open questions (resolved by S4)
+## Resolved by S4 / S4b / S5a
 
-- final opcode numbering and ranges reserved for additive growth;
-- exact integer/float encoding inside the constant pool;
-- debug section layout (line table vs. compressed spans);
-- versioning of the `debug` tag relative to the container.
+The questions originally tracked here are now specified above:
+
+- final opcode numbering and ranges reserved for additive growth — see the
+  *Instruction set* table (S5a);
+- exact integer/float encoding inside the constant pool — see `consts`
+  (S4b: `Int` i64 LE, `Float` f64 IEEE-754 LE, `Str` u32 length + UTF-8);
+- debug section layout — see `debug` (S4b: per-entry `bytecode_offset`,
+  `source_start`, `source_end`); a per-entry function-index field is
+  reserved for v1;
+- versioning of the `debug` tag relative to the container — the `debug`
+  section is optional within v0 and additive; v1 may extend each entry.

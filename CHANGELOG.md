@@ -10,6 +10,39 @@ Slice identifiers (e.g. **S1**, **S2**) refer to the roadmap captured in
 
 ## [Unreleased]
 
+### Changed
+
+- **Release hygiene / version reconciliation.** The Rust workspace
+  version was lagging at `0.1.3` while `VERSION`, `README.md` and the
+  `v0.1.4`-`v0.1.6` tags already advertised `0.1.6`. Bumped `Cargo.toml`
+  `workspace.package.version` and the nine workspace-crate entries in
+  `Cargo.lock` to `0.1.6`, and consolidated the accumulated S2-S7
+  engineering notes (previously parked under `[Unreleased]`) into a dated
+  `[0.1.6]` section.
+- **Documentation drift fixes.** `docs/bytecode-v0.md` now documents the
+  static-verifier error catalogue `B0013`-`B0020` and drops the stale
+  "to be populated during S4" / "open questions" framing; `README.md`
+  corrects the `capy-vm` error range to `V0001..V0016`.
+- **`.windsurf` guidance refresh.** The `capylang-project-map` and
+  `capylang-abi-contract` skills, the `00-project-authority` and
+  `20-abi-compatibility` rules, `.windsurf/README.md` and the workflow
+  pin/version references now reflect the delivered S1-S7 surface and the
+  pinned CapyOS core `0.8.0-alpha.260+20260525`.
+
+## [0.1.6] - 2026-05-21
+
+Consolidated feature release. The `0.1.4` and `0.1.5` tags were
+packaging / CI-formatting releases without a dedicated changelog entry;
+the engineering notes for the whole **S2-S7** arc are gathered here under
+the `0.1.6` tag that the working tree currently carries. That arc covers
+the recursive-descent parser + span-preserving AST (S2.0-S2.3b, plus the
+S2.2b `match`/pattern frontend), structured diagnostics (S3), the
+bytecode v0 container and typed sections (S4/S4b), the v0 opcode set and
+the static stack-balance verifier (S5a/S5c), the AST -> bytecode emitter
+(S5b.1-S5b.3 + S7 import lowering), the deterministic VM core (S6.1) and
+the host-call bridge (S7), together with the `capyc` unified CLI sketch
+(S12). The lexer (S1) is unchanged and remains additive within v0.
+
 ### Added
 
 - **Debug section wiring** — emitter ships `DebugInfo`; bridge
@@ -1155,7 +1188,8 @@ lexer in Rust with byte-precise spans and recoverable diagnostics.
 - Bumped `VERSION` from `0.0.1` to `0.1.0` and refreshed `README.md` with
   an *Active layout* section reflecting the new Rust crates.
 
-[Unreleased]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.3...v0.1.6
 [0.1.3]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.0...v0.1.1

@@ -176,7 +176,7 @@ break/continue outside any enclosing loop; S5b.3 added `E0016`
 
 ## CapyOS integration contract
 
-CapyOS core pinned: `0.8.0-alpha.244+20260520`.
+CapyOS core pinned: `0.8.0-alpha.260+20260525`.
 
 CapyOS integration must follow:
 
@@ -237,7 +237,7 @@ crates/
       lib.rs              # public API re-exports
       value.rs            # Value (None/Bool/Int/Float/Str)
       execute.rs          # Vm loader + interpreter loop
-      error.rs            # VmError + V0001..V0010 codes
+      error.rs            # VmError + V0001..V0016 codes
     tests/
       end_to_end.rs       # source -> AST -> bytecode -> Value integration tests
   capy-diagnostics/       # S3 - Severity, Code, Label, Diagnostic, SourceMap, render, bridges
