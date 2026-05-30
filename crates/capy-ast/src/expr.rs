@@ -101,6 +101,19 @@ pub enum Expr {
     },
     /// `loop <body-block>`.
     Loop { body: Box<Expr>, span: Span },
+    /// `for <var> in <start> .. <end> <body-block>` over an integer range
+    /// (`inclusive` selects `..=`). The emitter (`emit_for`) lowers this
+    /// to an initialise / poll / body / increment loop; `continue` jumps
+    /// to the increment so the loop variable always advances. The `end`
+    /// bound is re-evaluated each iteration in v0.
+    For {
+        var: Ident,
+        start: Box<Expr>,
+        end: Box<Expr>,
+        inclusive: bool,
+        body: Box<Expr>,
+        span: Span,
+    },
     /// `return [<value>]`. The trailing `;` (when used as a statement) is
     /// captured by [`Stmt::Expr`].
     Return {
@@ -123,6 +136,23 @@ pub enum Expr {
     Match {
         scrutinee: Box<Expr>,
         arms: Vec<MatchArm>,
+        span: Span,
+    },
+    /// Array literal `[e0, e1, ...]` (S6.2). `elems` may be empty.
+    Array { elems: Vec<Expr>, span: Span },
+    /// Assignment `target = value` (S2.4).
+    ///
+    /// The parser accepts any expression on the left and defers the
+    /// assignable-place check to the emitter, which currently restricts
+    /// `target` to a simple [`Expr::Ident`] (a function local). Compound
+    /// assignments (`+=`, `-=`, `*=`, `/=`, `%=`) are desugared by the
+    /// parser into `target = target <op> value`, so this variant always
+    /// represents a plain assignment. Assignment binds looser than every
+    /// binary operator, is right-associative, and evaluates to the unit
+    /// value (`None`).
+    Assign {
+        target: Box<Expr>,
+        value: Box<Expr>,
         span: Span,
     },
     /// Placeholder produced by parser error recovery. The `span` points at
@@ -258,10 +288,13 @@ impl Expr {
             | Self::If { span, .. }
             | Self::While { span, .. }
             | Self::Loop { span, .. }
+            | Self::For { span, .. }
             | Self::Return { span, .. }
             | Self::Break { span, .. }
             | Self::Continue { span }
             | Self::Match { span, .. }
+            | Self::Array { span, .. }
+            | Self::Assign { span, .. }
             | Self::Error { span } => *span,
             Self::Ident(id) => id.span,
         }
@@ -282,6 +315,7 @@ impl Expr {
                 | Self::If { .. }
                 | Self::While { .. }
                 | Self::Loop { .. }
+                | Self::For { .. }
                 | Self::Match { .. }
         )
     }

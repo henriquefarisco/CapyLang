@@ -395,6 +395,27 @@ fn write_expr(out: &mut String, expr: &Expr, depth: usize) {
             out.push_str("Body\n");
             write_expr(out, body, depth + 2);
         }
+        Expr::For {
+            var,
+            start,
+            end,
+            inclusive,
+            body,
+            ..
+        } => {
+            let op = if *inclusive { "..=" } else { ".." };
+            write!(out, " For {:?} {}", var.name, op).expect("infallible");
+            out.push('\n');
+            write_indent(out, depth + 1);
+            out.push_str("Start\n");
+            write_expr(out, start, depth + 2);
+            write_indent(out, depth + 1);
+            out.push_str("End\n");
+            write_expr(out, end, depth + 2);
+            write_indent(out, depth + 1);
+            out.push_str("Body\n");
+            write_expr(out, body, depth + 2);
+        }
         Expr::Return { value, .. } => {
             out.push_str(" Return\n");
             if let Some(v) = value {
@@ -420,6 +441,17 @@ fn write_expr(out: &mut String, expr: &Expr, depth: usize) {
             for arm in arms {
                 write_match_arm(out, arm, depth + 1);
             }
+        }
+        Expr::Array { elems, .. } => {
+            out.push_str(" Array\n");
+            for e in elems {
+                write_expr(out, e, depth + 1);
+            }
+        }
+        Expr::Assign { target, value, .. } => {
+            out.push_str(" Assign\n");
+            write_expr(out, target, depth + 1);
+            write_expr(out, value, depth + 1);
         }
         Expr::Error { .. } => {
             out.push_str(" Error\n");

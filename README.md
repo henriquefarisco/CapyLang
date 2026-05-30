@@ -1,6 +1,6 @@
 # CapyLang
 
-Version: 0.1.6
+Version: 0.1.7
 
 CapyLang is the external language-core repository for CapyOS.
 
@@ -106,9 +106,9 @@ instruction set, with wrapping i64 arithmetic, IEEE-754 floats,
 strict same-type binary ops (with `Int ↔ Float` promotion across
 the numeric category), strict `Bool` for `JumpIfFalse`/`Not`, a
 per-call instruction budget (default `1_000_000`) and a fail-closed
-error catalogue `V0001`-`V0013` (S5b.3 added `V0011`
-`CALL_STACK_OVERFLOW`, `V0012` `UNKNOWN_FUNCTION_INDEX` and `V0013`
-`CALL_ARITY_MISMATCH`). No JIT, no syscalls, no host pointers, no
+error catalogue `V0001`-`V0017` (S5b.3 added `V0011`-`V0013` for
+calls; S7 added `V0014`-`V0016` for host calls; S6.2 added `V0017`
+`INDEX_OUT_OF_BOUNDS`). No JIT, no syscalls, no host pointers, no
 global state.
 
 Slice **S5c (static stack-balance verifier)** runs at VM load time
@@ -157,6 +157,34 @@ break/continue outside any enclosing loop; S5b.3 added `E0016`
 `UNKNOWN_FUNCTION`, `E0017` `UNSUPPORTED_CALLEE`, `E0018`
 `DUPLICATE_FUNCTION` and `E0019` `TOO_MANY_ARGUMENTS`).
 
+Slice **S2.4 (assignment + mutation)** adds `Expr::Assign { target,
+value }` to the AST and parses `=` (plus the compound forms `+=`, `-=`,
+`*=`, `/=`, `%=`, desugared to `target = target <op> value`) at the
+lowest precedence, right-associative. The emitter lowers an assignment
+to a local into `<value>` + `StoreLocal` + `LoadNone` (the expression
+evaluates to unit), so reassignable locals make imperative loops such as
+`while i <= n { total = total + i; i = i + 1; }` expressible end-to-end.
+Only a simple local identifier is assignable in v0; other targets raise
+the typed `E0021 INVALID_ASSIGN_TARGET`, and assigning to an undeclared
+name reuses `E0003 UNKNOWN_LOCAL`.
+
+Slice **S5d (integer bitwise & shift operators)** wires `&`, `|`, `^`,
+`<<`, `>>` and unary `~` (parsed since S2.0 but previously rejected by
+the emitter) through the whole pipeline. Six opcodes join the v0 set
+additively — `band` (0x36), `bor` (0x37), `bxor` (0x38), `shl` (0x39),
+`shr` (0x3A) and `bnot` (0x51). They operate on integers only (a
+non-integer operand traps with `V0005 TYPE_MISMATCH`) and shift counts
+are reduced modulo 64, so the VM stays total and deterministic.
+
+Slice **S6.2 (arrays)** adds the first aggregate value: array literals
+`[a, b, c]`, indexing `a[i]`, indexed assignment `a[i] = v` and four
+opcodes (`make_array` 0x60, `array_get` 0x61, `array_set` 0x62,
+`array_len` 0x63). `Value::Array` has reference semantics (an
+`Rc<RefCell<Vec<Value>>>`) so a bound array is mutated in place; element
+access is bounds-checked and a bad index traps with `V0017
+INDEX_OUT_OF_BOUNDS`. This unblocks variable-length data such as a grid
+or the snake body.
+
 ## Scope owned by this repository
 
 - Parser and syntax validation.
@@ -176,7 +204,7 @@ break/continue outside any enclosing loop; S5b.3 added `E0016`
 
 ## CapyOS integration contract
 
-CapyOS core pinned: `0.8.0-alpha.260+20260525`.
+CapyOS core pinned: `0.8.0-alpha.261+20260529`.
 
 CapyOS integration must follow:
 
@@ -235,9 +263,9 @@ crates/
   capy-vm/                # S6.1 - deterministic stack-machine interpreter
     src/
       lib.rs              # public API re-exports
-      value.rs            # Value (None/Bool/Int/Float/Str)
+      value.rs            # Value (None/Bool/Int/Float/Str/Array)
       execute.rs          # Vm loader + interpreter loop
-      error.rs            # VmError + V0001..V0016 codes
+      error.rs            # VmError + V0001..V0017 codes
     tests/
       end_to_end.rs       # source -> AST -> bytecode -> Value integration tests
   capy-diagnostics/       # S3 - Severity, Code, Label, Diagnostic, SourceMap, render, bridges
@@ -259,7 +287,7 @@ crates/
       fixtures/source/    # 12 .cl + .ast pairs (statements + items + types)
   capyc-tokens/           # S1 - debug CLI (dump / counts / no-trivia modes)
     src/main.rs
-  capyc/                  # S12 - unified CLI (tokens/parse/compile/disasm/run)
+  capyc/                  # S12 - unified CLI (tokens/parse/check/compile/disasm/run/repl)
     src/main.rs
 docs/
   compatibility.md        # ABI and sandbox contract (pre-existing)
@@ -302,7 +330,7 @@ crates/
                    # S8-S9 real host ABI modules (planned)
   capy-stdlib/     # S10
   capy-host-abi/   # S11
-  capyc/           # S12 unified CLI (tokens/parse/compile/disasm/run) (sketch done)
+  capyc/           # S12 unified CLI (tokens/parse/check/compile/disasm/run/repl) (done)
 benchmarks/
   snake/           # S13
 ```
@@ -338,6 +366,10 @@ Unified toolchain CLI (`capyc`, S12 sketch):
 cargo run -p capyc -- tokens example.cl
 cargo run -p capyc -- parse  example.cl
 
+# Static check: rustc-style diagnostics (with source carets) for the
+# lexer, parser and emitter stages. Exit 1 if any diagnostic is shown.
+cargo run -p capyc -- check  example.cl
+
 # Compile to bytecode and disassemble it back.
 cargo run -p capyc -- compile example.cl -o example.bc
 cargo run -p capyc -- disasm example.bc
@@ -345,6 +377,10 @@ cargo run -p capyc -- disasm example.bc
 # Compile + run from source, or load + run a precompiled module.
 cargo run -p capyc -- run example.cl --entry main --budget 100000
 cargo run -p capyc -- run example.bc
+
+# Interactive REPL (one expression per line; composes with pipes).
+cargo run -p capyc -- repl
+echo '1 + 2 * 3' | cargo run -p capyc -- repl
 ```
 
 The CLI exits `0` on a clean lex, `1` when at least one diagnostic was
@@ -362,6 +398,9 @@ goldens).
 - `docs/bytecode-v0.md` - bytecode container header frozen for CapyOS-Etapa-15
 - `docs/integration.md` - CapyOS / CapyLang boundary rules
 - `docs/compatibility.md` - ABI and sandbox contract
+- `docs/roadmap.md` - master development plan (ordered slices, dependencies, path to Etapa 15)
+- `docs/aggregates.md` - S6.2 array value-model design (implemented)
+- `docs/structs-enums.md` - S6.3 struct/enum + `match` aggregate design (planned)
 - `CHANGELOG.md` - release notes anchored to slice IDs
 
 ## Integration rule

@@ -35,6 +35,11 @@ pub enum Instruction {
     Div,
     Mod,
     Neg,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
     Eq,
     Ne,
     Lt,
@@ -42,6 +47,16 @@ pub enum Instruction {
     Gt,
     Ge,
     Not,
+    BitNot,
+    /// Pop `count` values and push an array of them (index 0 = first
+    /// popped-in-source-order value).
+    MakeArray(u32),
+    /// `arr idx -> arr[idx]`.
+    ArrayGet,
+    /// `arr idx val -> arr` (writes `arr[idx]` in place).
+    ArraySet,
+    /// `arr -> len(arr)`.
+    ArrayLen,
     Jump(i32),
     JumpIfFalse(i32),
     /// Call into another function in the same module.
@@ -89,6 +104,11 @@ impl Instruction {
             Self::Div => Opcode::Div,
             Self::Mod => Opcode::Mod,
             Self::Neg => Opcode::Neg,
+            Self::BitAnd => Opcode::BitAnd,
+            Self::BitOr => Opcode::BitOr,
+            Self::BitXor => Opcode::BitXor,
+            Self::Shl => Opcode::Shl,
+            Self::Shr => Opcode::Shr,
             Self::Eq => Opcode::Eq,
             Self::Ne => Opcode::Ne,
             Self::Lt => Opcode::Lt,
@@ -96,6 +116,11 @@ impl Instruction {
             Self::Gt => Opcode::Gt,
             Self::Ge => Opcode::Ge,
             Self::Not => Opcode::Not,
+            Self::BitNot => Opcode::BitNot,
+            Self::MakeArray(_) => Opcode::MakeArray,
+            Self::ArrayGet => Opcode::ArrayGet,
+            Self::ArraySet => Opcode::ArraySet,
+            Self::ArrayLen => Opcode::ArrayLen,
             Self::Jump(_) => Opcode::Jump,
             Self::JumpIfFalse(_) => Opcode::JumpIfFalse,
             Self::Call { .. } => Opcode::Call,
@@ -114,7 +139,7 @@ impl Instruction {
     pub fn encode_into(self, out: &mut Vec<u8>) {
         out.push(self.opcode().as_byte());
         match self {
-            Self::LoadConst(v) | Self::LoadLocal(v) | Self::StoreLocal(v) => {
+            Self::LoadConst(v) | Self::LoadLocal(v) | Self::StoreLocal(v) | Self::MakeArray(v) => {
                 out.extend_from_slice(&v.to_le_bytes());
             }
             Self::Jump(v) | Self::JumpIfFalse(v) => {
@@ -178,6 +203,11 @@ pub fn decode(code: &[u8]) -> Result<Vec<Instruction>, BytecodeError> {
             Opcode::Div => Instruction::Div,
             Opcode::Mod => Instruction::Mod,
             Opcode::Neg => Instruction::Neg,
+            Opcode::BitAnd => Instruction::BitAnd,
+            Opcode::BitOr => Instruction::BitOr,
+            Opcode::BitXor => Instruction::BitXor,
+            Opcode::Shl => Instruction::Shl,
+            Opcode::Shr => Instruction::Shr,
             Opcode::Eq => Instruction::Eq,
             Opcode::Ne => Instruction::Ne,
             Opcode::Lt => Instruction::Lt,
@@ -185,6 +215,11 @@ pub fn decode(code: &[u8]) -> Result<Vec<Instruction>, BytecodeError> {
             Opcode::Gt => Instruction::Gt,
             Opcode::Ge => Instruction::Ge,
             Opcode::Not => Instruction::Not,
+            Opcode::BitNot => Instruction::BitNot,
+            Opcode::MakeArray => Instruction::MakeArray(read_u32(&mut cursor, op_pos)?),
+            Opcode::ArrayGet => Instruction::ArrayGet,
+            Opcode::ArraySet => Instruction::ArraySet,
+            Opcode::ArrayLen => Instruction::ArrayLen,
             Opcode::Jump => Instruction::Jump(read_i32(&mut cursor, op_pos)?),
             Opcode::JumpIfFalse => Instruction::JumpIfFalse(read_i32(&mut cursor, op_pos)?),
             Opcode::Call => {
@@ -242,7 +277,10 @@ pub fn disassemble_text(instructions: &[Instruction]) -> String {
     for ins in instructions {
         let _ = write!(out, "{offset:04x}  {}", ins.opcode().mnemonic());
         match *ins {
-            Instruction::LoadConst(v) | Instruction::LoadLocal(v) | Instruction::StoreLocal(v) => {
+            Instruction::LoadConst(v)
+            | Instruction::LoadLocal(v)
+            | Instruction::StoreLocal(v)
+            | Instruction::MakeArray(v) => {
                 let _ = write!(out, "  {v}");
             }
             Instruction::Jump(v) | Instruction::JumpIfFalse(v) => {
@@ -290,6 +328,16 @@ mod tests {
             Instruction::Gt,
             Instruction::Ge,
             Instruction::Not,
+            Instruction::BitAnd,
+            Instruction::BitOr,
+            Instruction::BitXor,
+            Instruction::Shl,
+            Instruction::Shr,
+            Instruction::BitNot,
+            Instruction::MakeArray(3),
+            Instruction::ArrayGet,
+            Instruction::ArraySet,
+            Instruction::ArrayLen,
             Instruction::Jump(-4),
             Instruction::JumpIfFalse(8),
             Instruction::Call { fn_idx: 7, argc: 2 },

@@ -72,6 +72,126 @@ fn let_and_use() {
 }
 
 #[test]
+fn assignment_mutates_local() {
+    assert_eq!(
+        run_source("fn main() { let x = 1; x = 2; x }\n").unwrap(),
+        Value::Int(2)
+    );
+}
+
+#[test]
+fn compound_assignment_accumulates() {
+    assert_eq!(
+        run_source("fn main() { let x = 10; x += 5; x }\n").unwrap(),
+        Value::Int(15)
+    );
+}
+
+#[test]
+fn while_loop_with_mutation_sums_range() {
+    // The headline win of S2.4: an imperative counting loop is now
+    // expressible because locals can be reassigned. Sums 1..=5 = 15.
+    let src = "fn main() {\n    let total = 0;\n    let i = 1;\n    while i <= 5 {\n        total = total + i;\n        i = i + 1;\n    }\n    total\n}\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(15));
+}
+
+#[test]
+fn bitwise_operators_evaluate() {
+    assert_eq!(run_source("fn main() { 6 & 3 }\n").unwrap(), Value::Int(2));
+    assert_eq!(run_source("fn main() { 6 | 1 }\n").unwrap(), Value::Int(7));
+    assert_eq!(run_source("fn main() { 6 ^ 3 }\n").unwrap(), Value::Int(5));
+    assert_eq!(run_source("fn main() { 1 << 4 }\n").unwrap(), Value::Int(16));
+    assert_eq!(run_source("fn main() { 32 >> 2 }\n").unwrap(), Value::Int(8));
+}
+
+#[test]
+fn bitwise_not_complements_int() {
+    // Two's complement: ~0 == -1, ~5 == -6.
+    assert_eq!(run_source("fn main() { ~0 }\n").unwrap(), Value::Int(-1));
+    assert_eq!(run_source("fn main() { ~5 }\n").unwrap(), Value::Int(-6));
+}
+
+#[test]
+fn bitwise_on_non_int_traps_type_mismatch() {
+    match run_source("fn main() { true & false }\n") {
+        Err(VmError::TypeMismatch { .. }) => {}
+        other => panic!("expected TypeMismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn string_concatenation_with_plus() {
+    assert_eq!(
+        run_source("fn main() { \"foo\" + \"bar\" }\n").unwrap(),
+        Value::Str("foobar".to_string())
+    );
+}
+
+#[test]
+fn adding_int_and_string_traps() {
+    match run_source("fn main() { 1 + \"x\" }\n") {
+        Err(VmError::TypeMismatch { .. }) => {}
+        other => panic!("expected TypeMismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn for_loop_inclusive_range_sums() {
+    // for i in 1..=5 { total = total + i; }  → 1+2+3+4+5 = 15
+    let src = "fn main() {\n    let total = 0;\n    for i in 1..=5 {\n        total = total + i;\n    }\n    total\n}\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(15));
+}
+
+#[test]
+fn for_loop_exclusive_range_sums() {
+    // for i in 0..5 { total = total + i; }  → 0+1+2+3+4 = 10
+    let src = "fn main() {\n    let total = 0;\n    for i in 0..5 {\n        total = total + i;\n    }\n    total\n}\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(10));
+}
+
+#[test]
+fn for_loop_with_continue_still_advances() {
+    // `continue` must jump to the increment, not the header, so the loop
+    // terminates. Counts iterations 0..5 → 5.
+    let src = "fn main() {\n    let n = 0;\n    for i in 0..5 {\n        n = n + 1;\n        continue;\n    }\n    n\n}\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(5));
+}
+
+#[test]
+fn array_literal_and_index() {
+    assert_eq!(
+        run_source("fn main() { let a = [10, 20, 30]; a[1] }\n").unwrap(),
+        Value::Int(20)
+    );
+}
+
+#[test]
+fn array_element_assignment_mutates_in_place() {
+    // Reference semantics: writing through one binding is visible when the
+    // same local is read back.
+    assert_eq!(
+        run_source("fn main() { let a = [1, 2, 3]; a[0] = 9; a[0] }\n").unwrap(),
+        Value::Int(9)
+    );
+}
+
+#[test]
+fn array_out_of_bounds_traps() {
+    match run_source("fn main() { let a = [1, 2]; a[5] }\n") {
+        Err(VmError::IndexOutOfBounds { .. }) => {}
+        other => panic!("expected IndexOutOfBounds, got {other:?}"),
+    }
+}
+
+#[test]
+fn for_loop_fills_and_sums_array() {
+    // Proves S2.4 (assignment) + S2.5 (for) + S6.2 (arrays) compose: fill
+    // a[i] = i for i in 0..5, then sum the elements. 0+1+2+3+4 = 10.
+    let src = "fn main() {\n    let a = [0, 0, 0, 0, 0];\n    for i in 0..5 {\n        a[i] = i;\n    }\n    let total = 0;\n    for i in 0..5 {\n        total = total + a[i];\n    }\n    total\n}\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(10));
+}
+
+#[test]
 fn if_then_branch_executed() {
     assert_eq!(
         run_source("fn main() { if 1 == 1 { 10 } else { 20 } }\n").unwrap(),

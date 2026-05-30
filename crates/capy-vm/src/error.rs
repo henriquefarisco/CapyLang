@@ -55,6 +55,9 @@ pub const V_UNRESOLVED_HOST_IMPORT: &str = "V0015";
 /// must be redacted before reaching this surface (`docs/integration.md`
 /// "host call privacy" rule).
 pub const V_HOST_CALL_FAILED: &str = "V0016";
+/// `ArrayGet` / `ArraySet` referenced an index outside the array's
+/// `0..len` range (or a negative index). Bounds-checked and fail-closed.
+pub const V_INDEX_OUT_OF_BOUNDS: &str = "V0017";
 
 /// Errors that the VM produces during loading or execution. All
 /// variants are fail-closed: the VM never panics on malformed bytecode
@@ -132,6 +135,11 @@ pub enum VmError {
         symbol: String,
         reason: &'static str,
     },
+    IndexOutOfBounds {
+        pc: u32,
+        index: i64,
+        len: usize,
+    },
 }
 
 impl VmError {
@@ -155,6 +163,7 @@ impl VmError {
             Self::UnknownHostImport { .. } => V_UNKNOWN_HOST_IMPORT,
             Self::UnresolvedHostImport { .. } => V_UNRESOLVED_HOST_IMPORT,
             Self::HostCallFailed { .. } => V_HOST_CALL_FAILED,
+            Self::IndexOutOfBounds { .. } => V_INDEX_OUT_OF_BOUNDS,
         }
     }
 
@@ -182,7 +191,8 @@ impl VmError {
             | Self::CallArityMismatch { pc, .. }
             | Self::UnknownHostImport { pc, .. }
             | Self::UnresolvedHostImport { pc, .. }
-            | Self::HostCallFailed { pc, .. } => Some(*pc),
+            | Self::HostCallFailed { pc, .. }
+            | Self::IndexOutOfBounds { pc, .. } => Some(*pc),
             Self::BudgetExhausted { .. }
             | Self::UnknownFunction { .. }
             | Self::MalformedModule { .. } => None,
@@ -303,6 +313,10 @@ impl fmt::Display for VmError {
             } => write!(
                 f,
                 "[{code}] host call `{module}::{symbol}` rejected: {reason} at pc=0x{pc:04x}"
+            ),
+            Self::IndexOutOfBounds { pc, index, len } => write!(
+                f,
+                "[{code}] array index {index} out of bounds (len={len}) at pc=0x{pc:04x}"
             ),
         }
     }
@@ -464,6 +478,14 @@ mod tests {
                     reason: "r",
                 },
                 V_HOST_CALL_FAILED,
+            ),
+            (
+                VmError::IndexOutOfBounds {
+                    pc: 0,
+                    index: 5,
+                    len: 3,
+                },
+                V_INDEX_OUT_OF_BOUNDS,
             ),
         ];
         for (err, code) in samples {

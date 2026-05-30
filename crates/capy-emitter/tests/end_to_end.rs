@@ -830,3 +830,81 @@ fn match_or_pattern_rejects_ident_alt() {
             if what.contains("identifier binding in or-pattern")
     )));
 }
+
+#[test]
+fn assignment_lowers_to_store_local_then_none() {
+    let parsed = parse_source("fn main() { let x = 1; x = 2; }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (table, consts, ins) = decode_first_fn(&out.module);
+    assert_eq!(consts.entries, vec![Constant::Int(1), Constant::Int(2)]);
+    assert_eq!(table.entries[0].locals_count, 1);
+    assert_eq!(
+        ins,
+        vec![
+            // let x = 1;
+            Instruction::LoadConst(0),
+            Instruction::StoreLocal(0),
+            // x = 2;  — assignment stores then evaluates to None, which the
+            // expression statement immediately pops.
+            Instruction::LoadConst(1),
+            Instruction::StoreLocal(0),
+            Instruction::LoadNone,
+            Instruction::Pop,
+            // block has no tail.
+            Instruction::LoadNone,
+            Instruction::Return,
+        ]
+    );
+}
+
+#[test]
+fn assignment_to_non_local_is_rejected() {
+    // The left-hand side `1` is not an assignable place (E0021).
+    let parsed = parse_source("fn main() { 1 = 2; }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.iter().any(|e| e.code() == "E0021"));
+}
+
+#[test]
+fn assignment_to_undeclared_local_is_rejected() {
+    // `y` was never bound with `let` (E0003).
+    let parsed = parse_source("fn main() { y = 1; }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.iter().any(|e| e.code() == "E0003"));
+}
+
+#[test]
+fn bitwise_and_lowers_to_band_opcode() {
+    let parsed = parse_source("fn main() { 6 & 3 }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_table, consts, ins) = decode_first_fn(&out.module);
+    assert_eq!(consts.entries, vec![Constant::Int(6), Constant::Int(3)]);
+    assert_eq!(
+        ins,
+        vec![
+            Instruction::LoadConst(0),
+            Instruction::LoadConst(1),
+            Instruction::BitAnd,
+            Instruction::Return,
+        ]
+    );
+}
+
+#[test]
+fn bitwise_not_lowers_to_bnot_opcode() {
+    let parsed = parse_source("fn main() { ~5 }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_table, consts, ins) = decode_first_fn(&out.module);
+    assert_eq!(consts.entries, vec![Constant::Int(5)]);
+    assert_eq!(
+        ins,
+        vec![
+            Instruction::LoadConst(0),
+            Instruction::BitNot,
+            Instruction::Return,
+        ]
+    );
+}

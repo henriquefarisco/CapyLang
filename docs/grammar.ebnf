@@ -88,7 +88,16 @@ error         = ? any byte sequence not matched above ? ;
 (* Implemented by `crates/capy-parser/`. Statements, items and control flow  *)
 (* are added in subsequent S2.x slices and must remain additive within v0.   *)
 
-expression    = binary_expr ;
+expression    = assignment ;
+
+(* --- S2.4: assignment (active) ----------------------------------------- *)
+(* Assignment binds looser than every binary operator and is               *)
+(* right-associative. Compound forms desugar in the parser to              *)
+(* `target = target <op> rhs`, so the AST only ever holds a plain          *)
+(* `Expr::Assign`. The assignable-place check (currently: a function       *)
+(* local identifier) is enforced by the emitter, not by the grammar.       *)
+assignment    = binary_expr , [ assign_op , assignment ] ;
+assign_op     = "=" | "+=" | "-=" | "*=" | "/=" | "%=" ;
 
 (* Precedence-climbing. Binding levels (low to high) match the numeric       *)
 (* `BinOp::precedence()` in `crates/capy-ast/src/expr.rs`.                   *)
@@ -120,10 +129,12 @@ primary_expr  = int_literal
               | "true" | "false" | "None"
               | path_expr
               | "(" , expression , ")"
+              | array_literal
               | block_expr
               | if_expr
               | while_expr
               | loop_expr
+              | for_expr
               | match_expr
               | return_expr
               | break_expr
@@ -140,9 +151,18 @@ if_expr       = "if" , expression , block_expr ,
                 [ "else" , ( if_expr | block_expr ) ] ;
 while_expr    = "while" , expression , block_expr ;
 loop_expr     = "loop" , block_expr ;
+(* S2.5: `for` over an integer range. `..=` is recognised by spatial   *)
+(* adjacency of `..` and `=` (no whitespace), like range patterns. The *)
+(* emitter lowers this to an init / poll / body / increment loop.      *)
+for_expr      = "for" , ident , "in" ,
+                expression , ( ".." | "..=" ) , expression , block_expr ;
 return_expr   = "return" , [ expression ] ;
 break_expr    = "break"  , [ expression ] ;
 continue_expr = "continue" ;
+(* S6.2: array literal. Elements are full expressions; a trailing       *)
+(* comma is allowed. Indexing reuses the existing postfix form          *)
+(* `expr "[" expr "]"`.                                                 *)
+array_literal = "[" , [ expression , { "," , expression } , [ "," ] ] , "]" ;
 
 (* --- S2.2b: match expressions and patterns (active) -------------------- *)
 (* `match` is block-like (statement form may omit `;`). The arm comma is  *)

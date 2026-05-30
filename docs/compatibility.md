@@ -7,7 +7,7 @@ integrated with CapyOS.
 
 ## CapyOS reference version
 
-- CapyOS core pinned for this contract: `0.8.0-alpha.260+20260525`
+- CapyOS core pinned for this contract: `0.8.0-alpha.261+20260529`
 - Authoritative cross-repo matrix: [`CapyOS/docs/reference/integration/compatibility-matrix.md`](../../CapyOS/docs/reference/integration/compatibility-matrix.md)
 - Canonical manifest format consumed by the in-tree adapter: [`CapyOS/docs/reference/integration/capypkg-publisher-manifest-format.md`](../../CapyOS/docs/reference/integration/capypkg-publisher-manifest-format.md)
 - Manual deploy runbook: [`CapyOS/docs/operations/manual-module-deploy-runbook.md`](../../CapyOS/docs/operations/manual-module-deploy-runbook.md)
@@ -41,7 +41,8 @@ Current ABI surface:
 - AST + parser (S2.0, expression sublanguage) — public `Expr` enum
   (`Int`, `Float`, `Str`, `Bool`, `NoneLit`, `Ident`, `Path`, `Paren`,
   `Call`, `Index`, `Field`, `Unary`, `Binary`, `Block`, `If`,
-  `While`, `Loop`, `Return`, `Break`, `Continue`, `Match`, `Error`),
+  `While`, `Loop`, `For`, `Return`, `Break`, `Continue`, `Match`,
+  `Array`, `Assign`, `Error`),
   the `MatchArm` and `Pattern` (`Wildcard`, `Rest`, `Literal`,
   `Ident`, `Path`, `TupleStruct`, `Struct`, `Or`, `Range`, `Error`)
   + `StructPatternField` companions for S2.2b, `Ident`,
@@ -121,17 +122,20 @@ Current ABI surface:
 - VM core (S6.1) — `capy-vm` crate publishing `Vm::from_module`,
   `Vm::from_module_with_host`, `Vm::with_host_adapter`,
   `Vm::run` / `Vm::run_with_budget`, `Value` (`None` / `Bool` /
-  `Int(i64)` / `Float(f64)` / `Str(String)`), `HostAdapter`,
+  `Int(i64)` / `Float(f64)` / `Str(String)` / `Array`, the last a
+  reference-semantics `Rc<RefCell<Vec<Value>>>` added by S6.2),
+  `HostAdapter`,
   `HostFn`, `HostResult` and `VmError` (implements
   `std::fmt::Display` + `std::error::Error`, output prefixed with
   the stable `[V<NNNN>]` code; exposes `code() -> &'static str` and
   `pc() -> Option<u32>` so downstream tooling can resolve errors
   through `capy-diagnostics::bridge::from_vm_with_debug`) with
   the frozen catalogue
-  `V0001`-`V0016` (S5b.3 added `V0011` `CALL_STACK_OVERFLOW`,
+  `V0001`-`V0017` (S5b.3 added `V0011` `CALL_STACK_OVERFLOW`,
   `V0012` `UNKNOWN_FUNCTION_INDEX`, `V0013` `CALL_ARITY_MISMATCH`;
   S7 added `V0014` `UNKNOWN_HOST_IMPORT`, `V0015`
-  `UNRESOLVED_HOST_IMPORT`, `V0016` `HOST_CALL_FAILED`)
+  `UNRESOLVED_HOST_IMPORT`, `V0016` `HOST_CALL_FAILED`; S6.2 added
+  `V0017` `INDEX_OUT_OF_BOUNDS`)
   (`STACK_UNDERFLOW`, `LOCAL_OUT_OF_BOUNDS`, `CONST_OUT_OF_BOUNDS`,
   `JUMP_OUT_OF_BOUNDS`, `TYPE_MISMATCH`, `DIVISION_BY_ZERO`,
   `BUDGET_EXHAUSTED`, `UNKNOWN_FUNCTION`, `MALFORMED_MODULE`,
@@ -139,22 +143,29 @@ Current ABI surface:
   AST → bytecode → execution pipeline. Determinism contract:
   wrapping i64 arithmetic, IEEE-754 floats, strict same-type
   binary ops with `Int <-> Float` promotion across the numeric
-  category, strict `Bool` for `JumpIfFalse`/`Not`, deterministic
+  category (the `Add` opcode additionally concatenates two `Str`
+  operands), strict `Bool` for `JumpIfFalse`/`Not`, deterministic
   error returns, no JIT, no syscalls, no host pointers, no global
   state. Per-call `DEFAULT_INSTRUCTION_BUDGET = 1_000_000` with a
   caller-overridable variant for modelling per-frame budgets.
 - AST → bytecode emitter (S5b.1 / S5b.2 / S5b.3 / S7) — `capy-emitter`
   crate publishing `emit(&Source) -> EmitOutput { module, errors }`,
   `EmitError` and `EmitErrorKind` plus the stable error catalogue
-  `E0001`-`E0020` (S5b.2 added `E0014` `BREAK_OUTSIDE_LOOP`,
+  `E0001`-`E0021` (S5b.2 added `E0014` `BREAK_OUTSIDE_LOOP`,
   `E0015` `CONTINUE_OUTSIDE_LOOP`; S5b.3 added `E0016`
   `UNKNOWN_FUNCTION`, `E0017` `UNSUPPORTED_CALLEE`, `E0018`
   `DUPLICATE_FUNCTION`, `E0019` `TOO_MANY_ARGUMENTS`; S7 added
-  `E0020` `DUPLICATE_IMPORT`). Lowers the
+  `E0020` `DUPLICATE_IMPORT`; S2.4 added `E0021`
+  `INVALID_ASSIGN_TARGET`). Lowers the
   v0 subset of the frontend — literals, locals, paren, unary
-  `Neg`/`Not`, arithmetic + comparison binary operators,
-  short-circuit `&&` / `||`, blocks, `let`, expr statements,
-  `if`/`else`, `while` / `loop` / `break` / `continue`, `return`,
+  `Neg`/`Not`/`BitNot`, arithmetic + comparison + integer
+  bitwise/shift binary operators (`&` `|` `^` `<<` `>>`),
+  short-circuit `&&` / `||`, blocks, `let`, assignment to locals and to
+  array elements (`target = value` and `a[i] = value`; compound
+  `+=`/`-=`/`*=`/`/=`/`%=` desugared in the parser), array literals
+  `[e0, ...]` and indexing `a[i]` (S6.2), expr statements,
+  `if`/`else`, `while` / `loop` / `for` (integer range) / `break` /
+  `continue`, `return`,
   function calls (`Expr::Call` with direct top-level identifier
   callees, lowered to `Call` for in-module `fn` targets and to
   `HostCall` for imported `module::symbol` targets since S7; local
@@ -162,16 +173,23 @@ Current ABI surface:
   top-level `Item::Fn` (with parameters registered as the first
   locals) + `Item::Import` forms into a fully self-consistent
   `Module` that round-trips through `Module::parse`.
-- v0 opcode set + instruction codec (S5a / S5b.3 / S7) — `Opcode`
-  (26 frozen byte values; `0x82 host_call` added by S7),
+- v0 opcode set + instruction codec (S5a / S5b.3 / S7 / S5d / S6.2) — `Opcode`
+  (36 frozen byte values; `0x82 host_call` added by S7; the integer
+  bitwise/shift opcodes `band`/`bor`/`bxor`/`shl`/`shr` (0x36-0x3A) and
+  `bnot` (0x51) added by S5d; the aggregate opcodes
+  `make_array`/`array_get`/`array_set`/`array_len` (0x60-0x63) added by
+  S6.2),
   `Imm { None, U32, I32, U32U32 }`,
   `Instruction` enum, `encode` / `decode` / `disassemble_text`.
   Defines the instruction stream inside `Function.code`. Stack
   manipulation (`Nop`, `Pop`), constants (`LoadConst U32`,
   `LoadTrue`, `LoadFalse`, `LoadNone`), locals (`LoadLocal U32`,
   `StoreLocal U32`), arithmetic (`Add`, `Sub`, `Mul`, `Div`,
-  `Mod`, `Neg`), comparison (`Eq`, `Ne`, `Lt`, `Le`, `Gt`, `Ge`),
-  logical (`Not`), control flow (`Jump I32`, `JumpIfFalse I32`
+  `Mod`, `Neg`), bitwise/shift on integers (`BitAnd`, `BitOr`,
+  `BitXor`, `Shl`, `Shr`, `BitNot`), comparison
+  (`Eq`, `Ne`, `Lt`, `Le`, `Gt`, `Ge`),
+  logical (`Not`), aggregates (`MakeArray U32`, `ArrayGet`, `ArraySet`,
+  `ArrayLen`), control flow (`Jump I32`, `JumpIfFalse I32`
   — both PC-relative to the byte after the immediate),
   function call (`Call U32U32` — `(fn_idx, argc)`), `Return` and
   host bridge (`HostCall U32U32` — `(import_idx, argc)`).
@@ -235,7 +253,7 @@ CapyLang does **not** own:
   `permissions`.
 - JIT is out of scope for the first integration wave. The VM
   interprets bytecode only.
-- The lexer (S1) is stable at v0.1.6; additive changes allowed
+- The lexer (S1) is stable at v0.1.7; additive changes allowed
   within minor versions; major changes require version bump and
   migration note.
 

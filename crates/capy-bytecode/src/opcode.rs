@@ -85,6 +85,16 @@ pub enum Opcode {
     Mod = 0x34,
     /// `a -> -a`
     Neg = 0x35,
+    /// `a b -> a&b` (bitwise AND, integers only)
+    BitAnd = 0x36,
+    /// `a b -> a|b` (bitwise OR, integers only)
+    BitOr = 0x37,
+    /// `a b -> a^b` (bitwise XOR, integers only)
+    BitXor = 0x38,
+    /// `a b -> a<<b` (left shift; shift count taken mod 64, integers only)
+    Shl = 0x39,
+    /// `a b -> a>>b` (arithmetic right shift; count mod 64, integers only)
+    Shr = 0x3A,
 
     // === Comparison =========================================================
     /// `a b -> a==b`
@@ -100,9 +110,23 @@ pub enum Opcode {
     /// `a b -> a>=b`
     Ge = 0x45,
 
-    // === Logical ============================================================
+    // === Logical / bitwise unary ===========================================
     /// `a -> !a`
     Not = 0x50,
+    /// `a -> ~a` (bitwise NOT / one's complement, integers only)
+    BitNot = 0x51,
+
+    // === Aggregates =========================================================
+    /// `MakeArray u32` — pop `n` values and push an array of them; the
+    /// first value popped (in source order) becomes index 0.
+    MakeArray = 0x60,
+    /// `arr idx -> arr[idx]` (bounds-checked; traps on out-of-range).
+    ArrayGet = 0x61,
+    /// `arr idx val -> arr` — write `arr[idx] = val` in place and push the
+    /// same array handle back.
+    ArraySet = 0x62,
+    /// `arr -> len(arr)` (pushes an `Int`).
+    ArrayLen = 0x63,
 
     // === Control flow =======================================================
     /// `Jump i32` — unconditional relative jump.
@@ -160,6 +184,11 @@ impl Opcode {
             0x33 => Self::Div,
             0x34 => Self::Mod,
             0x35 => Self::Neg,
+            0x36 => Self::BitAnd,
+            0x37 => Self::BitOr,
+            0x38 => Self::BitXor,
+            0x39 => Self::Shl,
+            0x3A => Self::Shr,
             0x40 => Self::Eq,
             0x41 => Self::Ne,
             0x42 => Self::Lt,
@@ -167,6 +196,11 @@ impl Opcode {
             0x44 => Self::Gt,
             0x45 => Self::Ge,
             0x50 => Self::Not,
+            0x51 => Self::BitNot,
+            0x60 => Self::MakeArray,
+            0x61 => Self::ArrayGet,
+            0x62 => Self::ArraySet,
+            0x63 => Self::ArrayLen,
             0x70 => Self::Jump,
             0x71 => Self::JumpIfFalse,
             0x80 => Self::Call,
@@ -186,7 +220,7 @@ impl Opcode {
     #[must_use]
     pub const fn immediate(self) -> Imm {
         match self {
-            Self::LoadConst | Self::LoadLocal | Self::StoreLocal => Imm::U32,
+            Self::LoadConst | Self::LoadLocal | Self::StoreLocal | Self::MakeArray => Imm::U32,
             Self::Jump | Self::JumpIfFalse => Imm::I32,
             Self::Call | Self::HostCall => Imm::U32U32,
             _ => Imm::None,
@@ -212,6 +246,11 @@ impl Opcode {
             Self::Div => "div",
             Self::Mod => "mod",
             Self::Neg => "neg",
+            Self::BitAnd => "band",
+            Self::BitOr => "bor",
+            Self::BitXor => "bxor",
+            Self::Shl => "shl",
+            Self::Shr => "shr",
             Self::Eq => "eq",
             Self::Ne => "ne",
             Self::Lt => "lt",
@@ -219,6 +258,11 @@ impl Opcode {
             Self::Gt => "gt",
             Self::Ge => "ge",
             Self::Not => "not",
+            Self::BitNot => "bnot",
+            Self::MakeArray => "make_array",
+            Self::ArrayGet => "array_get",
+            Self::ArraySet => "array_set",
+            Self::ArrayLen => "array_len",
             Self::Jump => "jump",
             Self::JumpIfFalse => "jump_if_false",
             Self::Call => "call",
@@ -256,6 +300,16 @@ mod tests {
             Opcode::Gt,
             Opcode::Ge,
             Opcode::Not,
+            Opcode::BitAnd,
+            Opcode::BitOr,
+            Opcode::BitXor,
+            Opcode::Shl,
+            Opcode::Shr,
+            Opcode::BitNot,
+            Opcode::MakeArray,
+            Opcode::ArrayGet,
+            Opcode::ArraySet,
+            Opcode::ArrayLen,
             Opcode::Jump,
             Opcode::JumpIfFalse,
             Opcode::Call,
@@ -312,6 +366,16 @@ mod tests {
             Opcode::Gt,
             Opcode::Ge,
             Opcode::Not,
+            Opcode::BitAnd,
+            Opcode::BitOr,
+            Opcode::BitXor,
+            Opcode::Shl,
+            Opcode::Shr,
+            Opcode::BitNot,
+            Opcode::MakeArray,
+            Opcode::ArrayGet,
+            Opcode::ArraySet,
+            Opcode::ArrayLen,
             Opcode::Jump,
             Opcode::JumpIfFalse,
             Opcode::Call,

@@ -10,6 +10,124 @@ Slice identifiers (e.g. **S1**, **S2**) refer to the roadmap captured in
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-29
+
+### Added
+
+- **S6.2 — aggregate value model: arrays.** The first composite runtime
+  value. `Value::Array` is a reference-semantics `Rc<RefCell<Vec<Value>>>`
+  so a bound array is mutated in place and aliases share one backing
+  store; the handle is opaque to bytecode. Four additive opcodes:
+  `make_array` (0x60), `array_get` (0x61), `array_set` (0x62) and
+  `array_len` (0x63); the new `V0017 INDEX_OUT_OF_BOUNDS` trap covers a
+  negative or out-of-range index (a non-array / non-int operand still
+  traps with `V0005 TYPE_MISMATCH`). The frontend gains `Expr::Array`,
+  array literals `[e0, ...]`, indexing `a[i]` (lowered to `array_get`,
+  replacing the former `E0001` rejection) and indexed assignment
+  `a[i] = v` (the first non-identifier assignment target). Arrays trap in
+  the arithmetic / comparison opcodes via the existing fall-through arms;
+  an in-language structural `==` is deferred (the derived `PartialEq` is
+  element-wise for host-side tests only).
+  - **Surface**: `Opcode::{MakeArray,ArrayGet,ArraySet,ArrayLen}` and the
+    matching `Instruction` variants; `docs/bytecode-v0.md`,
+    `docs/compatibility.md` and `docs/grammar.ebnf` updated; full design
+    in `docs/aggregates.md`.
+  - **Tests**: opcode + instruction round-trip arrays extended; VM
+    end-to-end tests for literal / index, in-place element assignment,
+    out-of-bounds trap, and a `for` loop that fills then sums an array
+    (proving S2.4 + S2.5 + S6.2 compose).
+  - **Decoupling preserved**: additive opcode growth within v0; the
+    32-byte header is untouched.
+
+- **S2.4 — assignment and mutation.** New `Expr::Assign { target, value }`
+  AST node; the parser recognises `=` and the compound operators `+=`,
+  `-=`, `*=`, `/=`, `%=` (desugared to `target = target <op> value`) at
+  the lowest precedence, right-associative. The emitter lowers an
+  assignment to a local into `<value>` + `StoreLocal` + `LoadNone` (the
+  expression evaluates to unit), so reassignable locals make imperative
+  `while` / `loop` counters expressible end-to-end. Only a simple local
+  identifier is assignable in v0; other targets raise the new typed
+  `E0021 INVALID_ASSIGN_TARGET`, and assigning to an undeclared name
+  reuses `E0003 UNKNOWN_LOCAL`. No new opcodes — reuses `StoreLocal` /
+  `LoadNone`; the v0 instruction set frozen by S5a is unchanged.
+  - **Surface**: `capy_ast::Expr::Assign`; emitter
+    `EmitErrorKind::InvalidAssignTarget` (`E0021`); new `assignment` /
+    `assign_op` productions in `docs/grammar.ebnf`.
+  - **Tests**: 5 parser unit tests (`crates/capy-parser/src/parser.rs`,
+    module `assign_tests`); 3 emitter tests (exact lowering plus the two
+    rejection codes) in `crates/capy-emitter/tests/end_to_end.rs`; 3 VM
+    end-to-end tests in `crates/capy-vm/tests/end_to_end.rs` (plain
+    assignment, compound assignment, and a mutating `while` loop that
+    sums `1..=5` to `15`).
+  - **Decoupling preserved**: no wire-format change; purely additive AST
+    + emitter growth within v0.
+
+- **S2.5 — `for` loops over integer ranges.** New `Expr::For { var,
+  start, end, inclusive, body }` AST node and `for <i> in <a>..<b> { … }`
+  / `..=` parsing (the inclusive form uses the same `..`-then-adjacent-`=`
+  rule as range patterns — there is no `..=` lexer token). The emitter
+  lowers it to an initialise / poll / body / increment loop reusing
+  existing opcodes (`StoreLocal`, `LoadLocal`, `Add`, `Lt` / `Le`,
+  `JumpIfFalse`, `Jump`); `continue` targets the increment so the loop
+  variable always advances (unlike a naive parser desugaring). No new
+  opcode or wire change. v0 caveats: the `end` bound is re-evaluated each
+  iteration and the loop variable is a function-scoped local.
+  - **Tests**: parser test `for_loop_parses_exclusive_and_inclusive`;
+    3 VM end-to-end tests (`for_loop_inclusive_range_sums` = 15,
+    `for_loop_exclusive_range_sums` = 10,
+    `for_loop_with_continue_still_advances` = 5).
+
+- **S5d — integer bitwise & shift operators.** The operators `&`, `|`,
+  `^`, `<<`, `>>` and unary `~` (parsed since S2.0 but previously
+  rejected by the emitter) now lower and execute. Six opcodes are added
+  to the v0 set (additive): `band` (0x36), `bor` (0x37), `bxor` (0x38),
+  `shl` (0x39), `shr` (0x3A) and `bnot` (0x51). The emitter maps the
+  matching `BinOp` / `UnOp` variants directly (replacing the former
+  `E0008` / `E0009` rejections, which stay reserved with no producer);
+  the VM executes them on `Int` operands only — a non-integer operand
+  traps with `V0005 TYPE_MISMATCH`, and shift counts are reduced modulo
+  64 via `wrapping_shl` / `wrapping_shr`, so the VM stays total and
+  deterministic. The static verifier treats the bitwise binaries like
+  `Add` (pop 2, push 1) and `bnot` like `Neg` (pop 1, push 1).
+  - **Surface**: `Opcode::{BitAnd,BitOr,BitXor,Shl,Shr,BitNot}` plus the
+    matching `Instruction` variants; the `docs/bytecode-v0.md`
+    instruction table is extended.
+  - **Tests**: opcode and instruction round-trip arrays extended; 3 VM
+    end-to-end tests (`bitwise_operators_evaluate`,
+    `bitwise_not_complements_int`,
+    `bitwise_on_non_int_traps_type_mismatch`) and 2 emitter lowering
+    tests in `crates/capy-emitter/tests/end_to_end.rs`.
+  - **Decoupling preserved**: additive opcode growth within v0; no
+    header or section-format change.
+
+- **S12 — `capyc check` subcommand.** New `capyc check [PATH]` runs the
+  lexer, parser and (when parsing is clean) the emitter, then renders
+  every diagnostic through `capy-diagnostics::render` — the rustc-style
+  block with `--> file:line:col`, the source line and a `^^^` caret —
+  instead of the terse inline format the other subcommands use. Lexer
+  diagnostics arrive via the parser's `ParseErrorKind::Lex` entries, so
+  `bridge::from_parse` covers the `L*` and `P*` families without a
+  duplicate lexer pass; emitter failures use `bridge::from_emit` (`E*`).
+  This is the first consumer of the otherwise-unused `capy-diagnostics`
+  dependency declared by `capyc`. Exit codes follow the existing
+  contract (`0` clean, `1` diagnostics, `2` usage / I/O).
+
+- **S12 — `capyc repl` subcommand.** New `capyc repl` reads one line at a
+  time from stdin, wraps each as the body of an implicit `fn main() { … }`,
+  compiles and executes it, and prints the resulting value. The prompt and
+  diagnostics go to stderr and successful values to stdout, so it composes
+  with pipes (`echo '1 + 2' | capyc repl`). State does not persist across
+  lines in this v0 sketch. With `check` and `repl` landed, the S12 command
+  set (`tokens` / `parse` / `check` / `compile` / `disasm` / `run` /
+  `repl`) is complete.
+
+- **String concatenation via `+`.** The `Add` opcode now concatenates two
+  `Str` operands (`"foo" + "bar"` → `"foobar"`) in addition to numeric
+  addition; `Sub` / `Mul` / `Div` / `Mod` stay numeric-only. No new
+  opcode or wire-format change — the emitter already lowered `+` to
+  `Add`; only the VM's runtime semantics gained the `(Str, Str)` case.
+  Mixed operands (e.g. `1 + "x"`) still trap with `V0005 TYPE_MISMATCH`.
+
 ### Changed
 
 - **Release hygiene / version reconciliation.** The Rust workspace
@@ -28,6 +146,23 @@ Slice identifiers (e.g. **S1**, **S2**) refer to the roadmap captured in
   `20-abi-compatibility` rules, `.windsurf/README.md` and the workflow
   pin/version references now reflect the delivered S1-S7 surface and the
   pinned CapyOS core `0.8.0-alpha.260+20260525`.
+- **Master development plan.** Added `docs/roadmap.md` — an authoritative,
+  ordered roadmap with per-slice dependencies, acceptance criteria and the
+  validation gate, sequencing the remaining work (aggregate value model ->
+  `struct`/`enum` + richer `match` -> host ABI -> Etapa 15 -> benchmarks)
+  toward the Snake / Asteroids goal. Repaired the dangling "authoritative
+  roadmap reference" in `docs/bytecode-v0.md` (it pointed at a
+  non-existent `.windsurf/plans/...` path) to point at it, and registered
+  it in the authority order (README documentation map, the
+  `capylang-project-map` skill and the `00-project-authority` rule).
+- **S6.3 design.** Added `docs/structs-enums.md`, the implementation-ready
+  design for `struct` / `enum` at runtime and the `match` tuple-struct /
+  struct / path lowering, building on the S6.2 aggregate machinery: a new
+  `Value::Aggregate`, opcodes `make_aggregate` / `get_field` / `get_tag`
+  (0x64-0x66), `V0018 FIELD_OUT_OF_BOUNDS`, a compile-time tag / layout
+  registry that needs no type checker, the struct-literal parser
+  ambiguity, and an S6.3a/b/c staging. (`docs/aggregates.md`, the S6.2
+  design, is now implemented — see Added.) Design only.
 
 ## [0.1.6] - 2026-05-21
 
@@ -1188,7 +1323,8 @@ lexer in Rust with byte-precise spans and recoverable diagnostics.
 - Bumped `VERSION` from `0.0.1` to `0.1.0` and refreshed `README.md` with
   an *Active layout* section reflecting the new Rust crates.
 
-[Unreleased]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.3...v0.1.6
 [0.1.3]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.1...v0.1.2

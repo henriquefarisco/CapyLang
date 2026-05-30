@@ -603,15 +603,10 @@ impl<'a> FunctionEmitter<'a> {
                 match op {
                     UnOp::Neg => self.emit_op(Opcode::Neg),
                     UnOp::Not => self.emit_op(Opcode::Not),
-                    UnOp::BitNot => {
-                        return Err(EmitError::new(
-                            EmitErrorKind::UnsupportedUnary { op: "BitNot" },
-                            *span,
-                        ));
-                    }
+                    UnOp::BitNot => self.emit_op(Opcode::BitNot),
                 }
             }
-            Expr::Binary { op, lhs, rhs, span } => self.emit_binary(*op, lhs, rhs, *span)?,
+            Expr::Binary { op, lhs, rhs, .. } => self.emit_binary(*op, lhs, rhs)?,
             Expr::Block { stmts, tail, .. } => self.emit_block(stmts, tail.as_deref())?,
             Expr::If {
                 cond,
@@ -627,11 +622,10 @@ impl<'a> FunctionEmitter<'a> {
                 ));
             }
             Expr::Call { callee, args, span } => self.emit_call(callee, args, *span)?,
-            Expr::Index { span, .. } => {
-                return Err(EmitError::new(
-                    EmitErrorKind::UnsupportedExpr { what: "index" },
-                    *span,
-                ));
+            Expr::Index { target, index, .. } => {
+                self.emit_expr(target)?;
+                self.emit_expr(index)?;
+                self.emit_op(Opcode::ArrayGet);
             }
             Expr::Field { span, .. } => {
                 return Err(EmitError::new(
@@ -641,6 +635,14 @@ impl<'a> FunctionEmitter<'a> {
             }
             Expr::While { cond, body, span } => self.emit_while(cond, body, *span)?,
             Expr::Loop { body, span } => self.emit_loop(body, *span)?,
+            Expr::For {
+                var,
+                start,
+                end,
+                inclusive,
+                body,
+                span,
+            } => self.emit_for(var, start, end, *inclusive, body, *span)?,
             Expr::Break { value, span } => self.emit_break(value.as_deref(), *span)?,
             Expr::Continue { span } => self.emit_continue(*span)?,
             Expr::Match {
@@ -648,6 +650,26 @@ impl<'a> FunctionEmitter<'a> {
                 arms,
                 span,
             } => self.emit_match(scrutinee, arms, *span)?,
+            Expr::Array { elems, span } => {
+                let n = u32::try_from(elems.len()).map_err(|_| {
+                    EmitError::new(
+                        EmitErrorKind::UnsupportedFeature {
+                            what: "array literal too large",
+                        },
+                        *span,
+                    )
+                })?;
+                for e in elems {
+                    self.emit_expr(e)?;
+                }
+                self.emit_op(Opcode::MakeArray);
+                self.emit_u32(n);
+            }
+            Expr::Assign {
+                target,
+                value,
+                span,
+            } => self.emit_assign(target, value, *span)?,
             Expr::Error { span } => {
                 return Err(EmitError::new(EmitErrorKind::ParseErrorInExpr, *span));
             }
@@ -669,12 +691,65 @@ impl<'a> FunctionEmitter<'a> {
         Ok(())
     }
 
+    /// Lowers `target = value` (S2.4).
+    ///
+    /// Only a simple local identifier is assignable in v0: the value is
+    /// evaluated, stored back into the resolved local slot, and the
+    /// assignment expression itself evaluates to the unit value
+    /// (`LoadNone`) so it leaves exactly one operand on the stack like
+    /// every other expression. Non-identifier targets and undeclared
+    /// names are rejected with typed, recoverable diagnostics.
+    fn emit_assign(&mut self, target: &Expr, value: &Expr, span: Span) -> Result<(), EmitError> {
+        match target {
+            Expr::Ident(id) => {
+                let idx = self.locals.get(&id.name).copied().ok_or_else(|| {
+                    EmitError::new(
+                        EmitErrorKind::UnknownLocal {
+                            name: id.name.clone(),
+                        },
+                        id.span,
+                    )
+                })?;
+                self.emit_expr(value)?;
+                self.emit_op(Opcode::StoreLocal);
+                self.emit_u32(idx);
+                self.emit_op(Opcode::LoadNone);
+            }
+            // Indexed assignment `a[i] = v` (S6.2): write the element in
+            // place via `ArraySet`, discard the array handle it returns,
+            // and evaluate to unit like every other assignment.
+            Expr::Index {
+                target: arr, index, ..
+            } => {
+                self.emit_expr(arr)?;
+                self.emit_expr(index)?;
+                self.emit_expr(value)?;
+                self.emit_op(Opcode::ArraySet);
+                self.emit_op(Opcode::Pop);
+                self.emit_op(Opcode::LoadNone);
+            }
+            other => {
+                let what = match other {
+                    Expr::Paren { .. } => "a parenthesised expression",
+                    Expr::Field { .. } => "a field access",
+                    Expr::Call { .. } => "a call expression",
+                    Expr::Path { .. } => "a path",
+                    _ => "this expression",
+                };
+                return Err(EmitError::new(
+                    EmitErrorKind::InvalidAssignTarget { what },
+                    span,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn emit_binary(
         &mut self,
         op: BinOp,
         lhs: &Expr,
         rhs: &Expr,
-        span: Span,
     ) -> Result<(), EmitError> {
         let opcode = match op {
             BinOp::Add => Opcode::Add,
@@ -690,12 +765,11 @@ impl<'a> FunctionEmitter<'a> {
             BinOp::Ge => Opcode::Ge,
             BinOp::And => return self.emit_and(lhs, rhs),
             BinOp::Or => return self.emit_or(lhs, rhs),
-            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
-                return Err(EmitError::new(
-                    EmitErrorKind::UnsupportedBinary { op: op.as_str() },
-                    span,
-                ));
-            }
+            BinOp::BitAnd => Opcode::BitAnd,
+            BinOp::BitOr => Opcode::BitOr,
+            BinOp::BitXor => Opcode::BitXor,
+            BinOp::Shl => Opcode::Shl,
+            BinOp::Shr => Opcode::Shr,
         };
         self.emit_expr(lhs)?;
         self.emit_expr(rhs)?;
@@ -901,6 +975,80 @@ impl<'a> FunctionEmitter<'a> {
         self.emit_jump(Opcode::Jump, loop_start, span);
 
         self.mark_label(break_label);
+        Ok(())
+    }
+
+    /// `for <var> in <start>..<end> <body>` lowering over an integer range.
+    ///
+    /// ```text
+    ///   <var> = start
+    /// loop_start:
+    ///   <var> < end            ; or `<=` when inclusive; end re-evaluated
+    ///   jump_if_false fallthrough
+    ///   <body>                 ; value discarded
+    /// cont_label:              ; `continue` lands here
+    ///   <var> = <var> + 1
+    ///   jump loop_start
+    /// break_label:             ; `break` payload discarded
+    ///   pop
+    /// fallthrough:
+    ///   load_none              ; the `for` expression evaluates to unit
+    /// ```
+    ///
+    /// `continue` targets `cont_label` (the increment) rather than the
+    /// header, so the loop variable always advances. The loop variable is
+    /// a named local; a name clash with an existing local is reported as
+    /// `DuplicateLocal`.
+    fn emit_for(
+        &mut self,
+        var: &Ident,
+        start: &Expr,
+        end: &Expr,
+        inclusive: bool,
+        body: &Expr,
+        span: Span,
+    ) -> Result<(), EmitError> {
+        let var_idx = self.allocate_local(&var.name, var.span)?;
+        self.emit_expr(start)?;
+        self.emit_op(Opcode::StoreLocal);
+        self.emit_u32(var_idx);
+
+        let loop_start = self.new_label();
+        let cont_label = self.new_label();
+        let break_label = self.new_label();
+        let fallthrough = self.new_label();
+
+        self.mark_label(loop_start);
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(var_idx);
+        self.emit_expr(end)?;
+        self.emit_op(if inclusive { Opcode::Le } else { Opcode::Lt });
+        self.emit_jump(Opcode::JumpIfFalse, fallthrough, span);
+
+        self.loop_stack.push(LoopCtx {
+            continue_label: cont_label,
+            break_label,
+        });
+        let body_result = self.emit_expr(body);
+        self.loop_stack.pop();
+        body_result?;
+        self.emit_op(Opcode::Pop);
+
+        self.mark_label(cont_label);
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(var_idx);
+        let one = self.consts.intern_int(1);
+        self.emit_op(Opcode::LoadConst);
+        self.emit_u32(one);
+        self.emit_op(Opcode::Add);
+        self.emit_op(Opcode::StoreLocal);
+        self.emit_u32(var_idx);
+        self.emit_jump(Opcode::Jump, loop_start, span);
+
+        self.mark_label(break_label);
+        self.emit_op(Opcode::Pop);
+        self.mark_label(fallthrough);
+        self.emit_op(Opcode::LoadNone);
         Ok(())
     }
 

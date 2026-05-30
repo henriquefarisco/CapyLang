@@ -1,6 +1,6 @@
 # CapyLang Lexer (S1)
 
-Status: **stable**, version `0.1.6`.
+Status: **stable**, version `0.1.7`.
 
 This document describes the deterministic contract between the Rust crate
 `capy-lexer` and every downstream consumer (parser, formatter, IDE tooling,

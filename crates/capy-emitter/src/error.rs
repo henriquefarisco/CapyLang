@@ -63,6 +63,10 @@ pub const E_TOO_MANY_ARGUMENTS: &str = "E0019";
 /// reported and ignored. Introduced by S7 when the emitter started
 /// lowering source-level calls into `HostCall`.
 pub const E_DUPLICATE_IMPORT: &str = "E0020";
+/// Assignment target is not an assignable place. v0 (S2.4) allows only a
+/// simple local identifier on the left of `=`; field, index, call, path
+/// and parenthesised targets are rejected here.
+pub const E_INVALID_ASSIGN_TARGET: &str = "E0021";
 
 /// Classification of a single emitter failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +91,7 @@ pub enum EmitErrorKind {
     DuplicateFunction { name: String },
     TooManyArguments { count: usize },
     DuplicateImport { name: String },
+    InvalidAssignTarget { what: &'static str },
 }
 
 /// A single recoverable emitter error.
@@ -127,6 +132,7 @@ impl EmitError {
             EmitErrorKind::DuplicateFunction { .. } => E_DUPLICATE_FUNCTION,
             EmitErrorKind::TooManyArguments { .. } => E_TOO_MANY_ARGUMENTS,
             EmitErrorKind::DuplicateImport { .. } => E_DUPLICATE_IMPORT,
+            EmitErrorKind::InvalidAssignTarget { .. } => E_INVALID_ASSIGN_TARGET,
         }
     }
 
@@ -199,6 +205,9 @@ impl EmitError {
             }
             EmitErrorKind::DuplicateImport { name } => {
                 format!("two `import` items resolve to the same callable name `{name}`")
+            }
+            EmitErrorKind::InvalidAssignTarget { what } => {
+                format!("cannot assign to {what}; only a local variable is assignable")
             }
         }
     }

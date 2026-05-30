@@ -7,8 +7,7 @@ external tooling and the CapyOS integration adapter (Etapa 15) can validate
 magic, version and ABI fields against this document. Opcodes, the constant
 pool layout and the verifier rules are specified below.
 
-Authoritative roadmap reference:
-`.windsurf/plans/capylang-roadmap-0c1ca5.md`
+Authoritative roadmap reference: `docs/roadmap.md`
 
 ## Versioning
 
@@ -113,6 +112,11 @@ follows the full instruction (PC after decoding the immediate); offset
 | 0x33 | `div`            | —         | `a b -> a/b`                            |
 | 0x34 | `mod`            | —         | `a b -> a%b`                            |
 | 0x35 | `neg`            | —         | `a -> -a`                               |
+| 0x36 | `band`           | —         | `a b -> a&b` (bitwise, ints)            |
+| 0x37 | `bor`            | —         | `a b -> a\|b` (bitwise, ints)           |
+| 0x38 | `bxor`           | —         | `a b -> a^b` (bitwise, ints)            |
+| 0x39 | `shl`            | —         | `a b -> a<<b` (ints, count mod 64)      |
+| 0x3A | `shr`            | —         | `a b -> a>>b` (ints, arithmetic)        |
 | 0x40 | `eq`             | —         | `a b -> a==b`                           |
 | 0x41 | `ne`             | —         | `a b -> a!=b`                           |
 | 0x42 | `lt`             | —         | `a b -> a<b`                            |
@@ -120,6 +124,11 @@ follows the full instruction (PC after decoding the immediate); offset
 | 0x44 | `gt`             | —         | `a b -> a>b`                            |
 | 0x45 | `ge`             | —         | `a b -> a>=b`                           |
 | 0x50 | `not`            | —         | `a -> !a`                               |
+| 0x51 | `bnot`           | —         | `a -> ~a` (bitwise, ints)               |
+| 0x60 | `make_array`     | `U32`     | `v0..vN-1 -> [v0, ..., vN-1]` (n elems) |
+| 0x61 | `array_get`      | —         | `arr idx -> arr[idx]` (bounds-checked)  |
+| 0x62 | `array_set`      | —         | `arr idx val -> arr` (writes in place)  |
+| 0x63 | `array_len`      | —         | `arr -> len(arr)` (Int)                 |
 | 0x70 | `jump`           | `I32`     | unchanged (PC += imm)                   |
 | 0x71 | `jump_if_false`  | `I32`     | `a -> ` (jumps if `!a`)                 |
 | 0x80 | `call`           | `U32U32`  | `arg0..argN-1 -> ret` (transfer to fn)  |
@@ -148,9 +157,18 @@ Unused byte values are reserved for additive growth within v0. Adding a
 new opcode is additive; renaming or reusing an existing byte value is
 breaking. `&&` / `||` short-circuit lowering (S5b.2) uses only the
 existing `jump` / `jump_if_false` opcodes. `call` (0x80) was introduced
-by S5b.3; `host_call` (0x82) by S7. `match` (S2.2b) parses today but
-its lowering will introduce additional opcodes that append to this
-table in a future slice.
+by S5b.3; `host_call` (0x82) by S7; the integer bitwise / shift opcodes
+`band` / `bor` / `bxor` / `shl` / `shr` (0x36-0x3A) and `bnot` (0x51)
+were added by S5d and operate on integer operands only (a non-integer
+operand traps with `V0005 TYPE_MISMATCH`; the shift count is reduced
+modulo 64). The aggregate opcodes `make_array` / `array_get` /
+`array_set` / `array_len` (0x60-0x63) were added by S6.2 (see
+`docs/aggregates.md`) and operate on arrays: a non-array or non-int
+operand traps with `V0005 TYPE_MISMATCH`, and an out-of-range or negative
+index traps with `V0017 INDEX_OUT_OF_BOUNDS`. The rest of the `0x60-0x6F`
+block stays reserved for future aggregate ops (tuple / struct in S6.3).
+`match` (S2.2b) parses today but its lowering will introduce additional
+opcodes that append to this table in a future slice.
 
 ### `imports` (0x03)
 

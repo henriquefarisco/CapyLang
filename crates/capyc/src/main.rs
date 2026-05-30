@@ -5,10 +5,12 @@
 //! ```text
 //! capyc tokens  [PATH]                 print canonical lexer dump
 //! capyc parse   [PATH]                 print canonical AST dump
+//! capyc check   [PATH]                 render diagnostics (rustc-style)
 //! capyc compile [PATH] [-o OUTPUT]     emit v0 bytecode bytes
 //! capyc disasm  [PATH]                 disassemble v0 bytecode
 //! capyc run     [PATH] [--entry NAME]
 //!                     [--budget N]     compile + execute via VM
+//! capyc repl                          interactive read-eval-print loop
 //! ```
 //!
 //! Design notes:
@@ -56,9 +58,11 @@ usage: capyc <SUBCOMMAND> [OPTIONS] [PATH]
 SUBCOMMANDS:
   tokens   Print the canonical lexer dump for PATH.
   parse    Print the canonical AST dump for PATH.
+  check    Check PATH and render diagnostics (rustc-style carets).
   compile  Compile PATH to v0 bytecode bytes.
   disasm   Disassemble a v0 bytecode file.
   run      Compile (or load) PATH and execute its entry function.
+  repl     Interactive read-eval-print loop (one expression per line).
   help     Show this help and exit.
 
 OPTIONS:
@@ -114,9 +118,11 @@ fn dispatch(args: &[String]) -> Result<ExitCode, String> {
         }
         "tokens" => cmd_tokens(&args[1..]),
         "parse" => cmd_parse(&args[1..]),
+        "check" => cmd_check(&args[1..]),
         "compile" => cmd_compile(&args[1..]),
         "disasm" => cmd_disasm(&args[1..]),
         "run" => cmd_run(&args[1..]),
+        "repl" => cmd_repl(&args[1..]),
         other => Err(format!("unknown subcommand `{other}`")),
     }
 }
@@ -151,6 +157,37 @@ fn cmd_parse(args: &[String]) -> Result<ExitCode, String> {
     if !result.diagnostics.is_empty() {
         for d in &result.diagnostics {
             eprintln!("{}", render_parse_diagnostic(d));
+        }
+        return Ok(ExitCode::from(1));
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+// ---------------------------------------------------------------------
+// check
+// ---------------------------------------------------------------------
+
+fn cmd_check(args: &[String]) -> Result<ExitCode, String> {
+    let path = take_path_arg(args)?;
+    let source = read_source(&path)?;
+    // Label shown in each rendered `--> <file>:<line>:<col>` header.
+    let file = if path == "-" { "<stdin>" } else { path.as_str() };
+    let parsed = parse_source(&source);
+    if !parsed.diagnostics.is_empty() {
+        // Lexer diagnostics are already threaded into the parser output as
+        // `ParseErrorKind::Lex`, so `from_parse` renders both the L* and
+        // P* code families without duplicating the lexer pass.
+        for d in &parsed.diagnostics {
+            let diag = capy_diagnostics::from_parse(d);
+            eprint!("{}", capy_diagnostics::render(&diag, &source, file));
+        }
+        return Ok(ExitCode::from(1));
+    }
+    let emitted = emit(&parsed.source);
+    if !emitted.errors.is_empty() {
+        for e in &emitted.errors {
+            let diag = capy_diagnostics::from_emit(e);
+            eprint!("{}", capy_diagnostics::render(&diag, &source, file));
         }
         return Ok(ExitCode::from(1));
     }
@@ -370,6 +407,77 @@ fn cmd_run(args: &[String]) -> Result<ExitCode, String> {
 }
 
 // ---------------------------------------------------------------------
+// repl
+// ---------------------------------------------------------------------
+
+fn cmd_repl(args: &[String]) -> Result<ExitCode, String> {
+    for a in args {
+        match a.as_str() {
+            "-h" | "--help" => {
+                print!("{USAGE}");
+                return Ok(ExitCode::SUCCESS);
+            }
+            other => return Err(format!("unexpected argument `{other}`")),
+        }
+    }
+    let stdin = io::stdin();
+    let mut line = String::new();
+    // Prompt and diagnostics go to stderr; only successful values go to
+    // stdout, so the REPL composes with pipes (`echo '1 + 2' | capyc repl`).
+    eprintln!("capyc {VERSION} repl — one expression per line, Ctrl-D to exit.");
+    loop {
+        eprint!("capy> ");
+        let _ = io::stderr().flush();
+        line.clear();
+        let n = stdin
+            .read_line(&mut line)
+            .map_err(|e| format!("stdin: {e}"))?;
+        if n == 0 {
+            eprintln!();
+            break;
+        }
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            eval_repl_line(trimmed);
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Evaluates a single REPL input by wrapping it as the body of an implicit
+/// `main`, compiling and executing it. State does not persist across lines
+/// in this v0 sketch; each line is an independent program body.
+fn eval_repl_line(line: &str) {
+    let source = format!("fn main() {{ {line} }}\n");
+    let parsed = parse_source(&source);
+    if !parsed.diagnostics.is_empty() {
+        for d in &parsed.diagnostics {
+            eprintln!("{}", render_parse_diagnostic(d));
+        }
+        return;
+    }
+    let emitted = emit(&parsed.source);
+    if !emitted.errors.is_empty() {
+        for e in &emitted.errors {
+            eprintln!("{}", render_emit_error(e));
+        }
+        return;
+    }
+    let bytes = emitted.module.serialize();
+    let vm = match Vm::from_module_with_host(&bytes, HostAdapter::with_builtin_stubs()) {
+        Ok(vm) => vm,
+        Err(e) => {
+            eprintln!("load: {e}");
+            return;
+        }
+    };
+    match vm.run_with_budget("main", DEFAULT_INSTRUCTION_BUDGET) {
+        Ok(v) => println!("{}", format_value(&v)),
+        Err(e) => eprintln!("runtime: {e}"),
+    }
+}
+
+// ---------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------
 
@@ -453,5 +561,9 @@ fn format_value(v: &Value) -> String {
             format!("{f:?}")
         }
         Value::Str(s) => format!("{s:?}"),
+        Value::Array(a) => {
+            let parts: Vec<String> = a.borrow().iter().map(format_value).collect();
+            format!("[{}]", parts.join(", "))
+        }
     }
 }

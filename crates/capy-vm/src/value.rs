@@ -8,6 +8,9 @@
 
 #![forbid(unsafe_code)]
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 /// A value that lives on the VM's evaluation stack or in a function's
 /// locals slot.
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +26,13 @@ pub enum Value {
     /// Owned string. Clone-on-store for v0; will move to a shared
     /// representation in a future refinement.
     Str(String),
+    /// Heap array with **reference semantics** (S6.2): a bound array is
+    /// mutated in place and aliases share one backing store. The handle
+    /// is opaque to bytecode — no host pointer crosses the boundary.
+    /// The derived `PartialEq` is element-wise (used by host-side tests);
+    /// the VM's in-language comparison opcodes (`Eq` / `Ne` / ordering)
+    /// trap on arrays with `TYPE_MISMATCH` in v0.
+    Array(Rc<RefCell<Vec<Value>>>),
 }
 
 impl Value {
@@ -35,6 +45,7 @@ impl Value {
             Self::Int(_) => "int",
             Self::Float(_) => "float",
             Self::Str(_) => "str",
+            Self::Array(_) => "array",
         }
     }
 }

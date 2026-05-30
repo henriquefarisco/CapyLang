@@ -330,6 +330,8 @@ fn required_inputs(ins: Instruction) -> u32 {
         | Instruction::StoreLocal(_)
         | Instruction::Neg
         | Instruction::Not
+        | Instruction::BitNot
+        | Instruction::ArrayLen
         | Instruction::JumpIfFalse(_)
         | Instruction::Return => 1,
         Instruction::Add
@@ -337,12 +339,20 @@ fn required_inputs(ins: Instruction) -> u32 {
         | Instruction::Mul
         | Instruction::Div
         | Instruction::Mod
+        | Instruction::BitAnd
+        | Instruction::BitOr
+        | Instruction::BitXor
+        | Instruction::Shl
+        | Instruction::Shr
         | Instruction::Eq
         | Instruction::Ne
         | Instruction::Lt
         | Instruction::Le
         | Instruction::Gt
-        | Instruction::Ge => 2,
+        | Instruction::Ge
+        | Instruction::ArrayGet => 2,
+        Instruction::ArraySet => 3,
+        Instruction::MakeArray(n) => n,
         Instruction::Call { argc, .. } | Instruction::HostCall { argc, .. } => argc,
     }
 }
@@ -362,17 +372,27 @@ fn produced_outputs(ins: Instruction) -> u32 {
         | Instruction::LoadLocal(_)
         | Instruction::Neg
         | Instruction::Not
+        | Instruction::BitNot
         | Instruction::Add
         | Instruction::Sub
         | Instruction::Mul
         | Instruction::Div
         | Instruction::Mod
+        | Instruction::BitAnd
+        | Instruction::BitOr
+        | Instruction::BitXor
+        | Instruction::Shl
+        | Instruction::Shr
         | Instruction::Eq
         | Instruction::Ne
         | Instruction::Lt
         | Instruction::Le
         | Instruction::Gt
         | Instruction::Ge
+        | Instruction::MakeArray(_)
+        | Instruction::ArrayGet
+        | Instruction::ArraySet
+        | Instruction::ArrayLen
         | Instruction::Call { .. }
         | Instruction::HostCall { .. } => 1,
     }

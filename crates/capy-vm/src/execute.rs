@@ -18,7 +18,9 @@
 
 #![forbid(unsafe_code)]
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use capy_bytecode::{
     decode, verify_function, ConstPool, Constant, FunctionTable, Import, ImportTable, Instruction,
@@ -300,11 +302,16 @@ impl<'a> ExecState<'a> {
                             })?;
                     *slot = v;
                 }
-                Instruction::Add => self.binop_numeric(pc, "add", BinOp::Add)?,
+                Instruction::Add => self.op_add(pc)?,
                 Instruction::Sub => self.binop_numeric(pc, "sub", BinOp::Sub)?,
                 Instruction::Mul => self.binop_numeric(pc, "mul", BinOp::Mul)?,
                 Instruction::Div => self.binop_numeric(pc, "div", BinOp::Div)?,
                 Instruction::Mod => self.binop_numeric(pc, "mod", BinOp::Mod)?,
+                Instruction::BitAnd => self.binop_bitwise(pc, "band", BitOp::And)?,
+                Instruction::BitOr => self.binop_bitwise(pc, "bor", BitOp::Or)?,
+                Instruction::BitXor => self.binop_bitwise(pc, "bxor", BitOp::Xor)?,
+                Instruction::Shl => self.binop_bitwise(pc, "shl", BitOp::Shl)?,
+                Instruction::Shr => self.binop_bitwise(pc, "shr", BitOp::Shr)?,
                 Instruction::Neg => {
                     let v = self.pop(pc)?;
                     let r = match v {
@@ -336,6 +343,62 @@ impl<'a> ExecState<'a> {
                                 pc,
                                 op: "not",
                                 expected: "bool",
+                                found: other.type_name(),
+                            });
+                        }
+                    }
+                }
+                Instruction::BitNot => {
+                    let v = self.pop(pc)?;
+                    match v {
+                        Value::Int(x) => self.stack.push(Value::Int(!x)),
+                        other => {
+                            return Err(VmError::TypeMismatch {
+                                pc,
+                                op: "bnot",
+                                expected: "int",
+                                found: other.type_name(),
+                            });
+                        }
+                    }
+                }
+                Instruction::MakeArray(n) => {
+                    let n = n as usize;
+                    if self.stack.len() < n {
+                        return Err(VmError::StackUnderflow { pc });
+                    }
+                    // The top `n` operands become the array, in source
+                    // order (the first-pushed value is index 0).
+                    let start = self.stack.len() - n;
+                    let elems: Vec<Value> = self.stack.split_off(start);
+                    self.stack.push(Value::Array(Rc::new(RefCell::new(elems))));
+                }
+                Instruction::ArrayGet => {
+                    let idx = self.pop(pc)?;
+                    let arr = self.pop(pc)?;
+                    let elem = array_index(pc, &arr, &idx, "array_get")?;
+                    self.stack.push(elem);
+                }
+                Instruction::ArraySet => {
+                    let val = self.pop(pc)?;
+                    let idx = self.pop(pc)?;
+                    let arr = self.pop(pc)?;
+                    array_store(pc, &arr, &idx, val, "array_set")?;
+                    // Reference semantics: push the same handle back.
+                    self.stack.push(arr);
+                }
+                Instruction::ArrayLen => {
+                    let arr = self.pop(pc)?;
+                    match &arr {
+                        Value::Array(a) => {
+                            let len = a.borrow().len();
+                            self.stack.push(Value::Int(len as i64));
+                        }
+                        other => {
+                            return Err(VmError::TypeMismatch {
+                                pc,
+                                op: "array_len",
+                                expected: "array",
                                 found: other.type_name(),
                             });
                         }
@@ -476,7 +539,6 @@ impl<'a> ExecState<'a> {
         let a = self.pop(pc)?;
         let r = match (a, b) {
             (Value::Int(x), Value::Int(y)) => match kind {
-                BinOp::Add => Value::Int(x.wrapping_add(y)),
                 BinOp::Sub => Value::Int(x.wrapping_sub(y)),
                 BinOp::Mul => Value::Int(x.wrapping_mul(y)),
                 BinOp::Div => {
@@ -500,6 +562,71 @@ impl<'a> ExecState<'a> {
                     pc,
                     op,
                     expected: "int|float",
+                    found: type_pair(&a, &b),
+                });
+            }
+        };
+        self.stack.push(r);
+        Ok(())
+    }
+
+    /// `Add` opcode handler.
+    ///
+    /// Adds two numbers (with `Int`/`Float` promotion and wrapping `Int`
+    /// arithmetic) or concatenates two strings. Any other operand
+    /// combination traps with `TypeMismatch`. `Sub` / `Mul` / `Div` /
+    /// `Mod` stay numeric-only via [`Self::binop_numeric`].
+    fn op_add(&mut self, pc: u32) -> Result<(), VmError> {
+        let b = self.pop(pc)?;
+        let a = self.pop(pc)?;
+        let r = match (a, b) {
+            (Value::Str(x), Value::Str(y)) => {
+                let mut s = x;
+                s.push_str(&y);
+                Value::Str(s)
+            }
+            (Value::Int(x), Value::Int(y)) => Value::Int(x.wrapping_add(y)),
+            (Value::Float(x), Value::Float(y)) => Value::Float(x + y),
+            (Value::Int(x), Value::Float(y)) => Value::Float(x as f64 + y),
+            (Value::Float(x), Value::Int(y)) => Value::Float(x + y as f64),
+            (a, b) => {
+                return Err(VmError::TypeMismatch {
+                    pc,
+                    op: "add",
+                    expected: "int|float|str",
+                    found: type_pair(&a, &b),
+                });
+            }
+        };
+        self.stack.push(r);
+        Ok(())
+    }
+
+    /// Integer-only bitwise / shift binary operations.
+    ///
+    /// Both operands must be `Int`; any other combination traps with
+    /// `TypeMismatch`. Shift counts are reduced modulo 64 (the `i64` bit
+    /// width) via `wrapping_shl` / `wrapping_shr`, so the VM stays total
+    /// and deterministic for every input.
+    fn binop_bitwise(&mut self, pc: u32, op: &'static str, kind: BitOp) -> Result<(), VmError> {
+        let b = self.pop(pc)?;
+        let a = self.pop(pc)?;
+        let r = match (a, b) {
+            (Value::Int(x), Value::Int(y)) => {
+                let v = match kind {
+                    BitOp::And => x & y,
+                    BitOp::Or => x | y,
+                    BitOp::Xor => x ^ y,
+                    BitOp::Shl => x.wrapping_shl(y as u32),
+                    BitOp::Shr => x.wrapping_shr(y as u32),
+                };
+                Value::Int(v)
+            }
+            (a, b) => {
+                return Err(VmError::TypeMismatch {
+                    pc,
+                    op,
+                    expected: "int",
                     found: type_pair(&a, &b),
                 });
             }
@@ -554,13 +681,26 @@ impl<'a> ExecState<'a> {
     }
 }
 
+/// Numeric binary operators routed through [`Vm::binop_numeric`].
+///
+/// `Add` is intentionally absent: addition is handled by
+/// [`Vm::op_add`] (which also concatenates strings), so the only
+/// numeric-only operators left here are subtraction through modulo.
 #[derive(Debug, Clone, Copy)]
 enum BinOp {
-    Add,
     Sub,
     Mul,
     Div,
     Mod,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BitOp {
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -573,11 +713,72 @@ enum Ordering {
 
 fn apply_float(kind: BinOp, x: f64, y: f64) -> f64 {
     match kind {
-        BinOp::Add => x + y,
         BinOp::Sub => x - y,
         BinOp::Mul => x * y,
         BinOp::Div => x / y,
         BinOp::Mod => x % y,
+    }
+}
+
+/// Resolves `arr[idx]` for `ArrayGet`, cloning the element out.
+///
+/// Requires `arr` to be an `Array` and `idx` an `Int`; a negative or
+/// out-of-range index traps fail-closed with `IndexOutOfBounds`.
+fn array_index(pc: u32, arr: &Value, idx: &Value, op: &'static str) -> Result<Value, VmError> {
+    let cell = expect_array(pc, arr, op)?;
+    let i = expect_index(pc, idx, op)?;
+    let v = cell.borrow();
+    let len = v.len();
+    if i < 0 || (i as u64) >= len as u64 {
+        return Err(VmError::IndexOutOfBounds { pc, index: i, len });
+    }
+    Ok(v[i as usize].clone())
+}
+
+/// Writes `arr[idx] = val` in place for `ArraySet` (reference semantics).
+fn array_store(
+    pc: u32,
+    arr: &Value,
+    idx: &Value,
+    val: Value,
+    op: &'static str,
+) -> Result<(), VmError> {
+    let cell = expect_array(pc, arr, op)?;
+    let i = expect_index(pc, idx, op)?;
+    let mut v = cell.borrow_mut();
+    let len = v.len();
+    if i < 0 || (i as u64) >= len as u64 {
+        return Err(VmError::IndexOutOfBounds { pc, index: i, len });
+    }
+    v[i as usize] = val;
+    Ok(())
+}
+
+fn expect_array<'a>(
+    pc: u32,
+    v: &'a Value,
+    op: &'static str,
+) -> Result<&'a Rc<RefCell<Vec<Value>>>, VmError> {
+    match v {
+        Value::Array(a) => Ok(a),
+        other => Err(VmError::TypeMismatch {
+            pc,
+            op,
+            expected: "array",
+            found: other.type_name(),
+        }),
+    }
+}
+
+fn expect_index(pc: u32, v: &Value, op: &'static str) -> Result<i64, VmError> {
+    match v {
+        Value::Int(i) => Ok(*i),
+        other => Err(VmError::TypeMismatch {
+            pc,
+            op,
+            expected: "int",
+            found: other.type_name(),
+        }),
     }
 }
 

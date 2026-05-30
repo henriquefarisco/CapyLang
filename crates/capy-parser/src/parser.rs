@@ -219,6 +219,35 @@ impl<'a> Parser<'a> {
                 span,
             };
         }
+        // Assignment binds looser than every binary operator and is
+        // right-associative. It is only recognised at the top expression
+        // level (`MIN_PREC`); binary operands recurse with a higher
+        // `min_prec` and therefore never absorb a trailing `=`. Compound
+        // assignments (`+=`, ...) desugar into `target = target <op> rhs`.
+        let assign = if min_prec == MIN_PREC {
+            token_to_assign_op(self.peek().kind)
+        } else {
+            None
+        };
+        if let Some(compound) = assign {
+            self.advance();
+            let rhs = self.parse_expression(MIN_PREC);
+            let span = Span::new(lhs.span().start, rhs.span().end);
+            let value = match compound {
+                None => rhs,
+                Some(op) => Expr::Binary {
+                    op,
+                    lhs: Box::new(lhs.clone()),
+                    rhs: Box::new(rhs),
+                    span,
+                },
+            };
+            lhs = Expr::Assign {
+                target: Box::new(lhs),
+                value: Box::new(value),
+                span,
+            };
+        }
         lhs
     }
 
@@ -357,9 +386,11 @@ impl<'a> Parser<'a> {
                     span,
                 }
             }
+            TokenKind::LBracket => self.parse_array_literal(),
             TokenKind::LBrace => self.parse_block_expr(),
             TokenKind::If => self.parse_if_expr(),
             TokenKind::While => self.parse_while_expr(),
+            TokenKind::For => self.parse_for_expr(),
             TokenKind::Loop => self.parse_loop_expr(),
             TokenKind::Match => self.parse_match_expr(),
             TokenKind::Return => self.parse_return_expr(),
@@ -565,6 +596,25 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// `[ [ expr ("," expr)* [","] ] ]` — array literal (S6.2).
+    fn parse_array_literal(&mut self) -> Expr {
+        let open = self.expect(TokenKind::LBracket, "`[`");
+        let mut elems = Vec::new();
+        while !matches!(self.peek().kind, TokenKind::RBracket | TokenKind::Eof) {
+            elems.push(self.parse_expression(MIN_PREC));
+            if self.peek().kind == TokenKind::Comma {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        let close = self.expect(TokenKind::RBracket, "`]`");
+        Expr::Array {
+            elems,
+            span: Span::new(open.span.start, close.span.end),
+        }
+    }
+
     /// `if <cond> <block> [else (if-expr | block)]`
     fn parse_if_expr(&mut self) -> Expr {
         let if_kw = self.expect(TokenKind::If, "`if`");
@@ -610,6 +660,35 @@ impl<'a> Parser<'a> {
         let body = self.parse_block_expr();
         let span = Span::new(loop_kw.span.start, body.span().end);
         Expr::Loop {
+            body: Box::new(body),
+            span,
+        }
+    }
+
+    /// `for <ident> in <start> ( ".." | "..=" ) <end> <block>`.
+    ///
+    /// v0 supports an integer range iterator only. `..=` is recognised by
+    /// the same `..`-then-adjacent-`=` rule used by range patterns (no
+    /// dedicated `..=` lexer token).
+    fn parse_for_expr(&mut self) -> Expr {
+        let for_kw = self.expect(TokenKind::For, "`for`");
+        let var = self.expect_ident("loop variable after `for`");
+        self.expect(TokenKind::In, "`in`");
+        let start = self.parse_expression(MIN_PREC);
+        let dotdot = self.expect(TokenKind::DotDot, "`..` in `for` range");
+        let inclusive =
+            self.peek().kind == TokenKind::Eq && self.peek().span.start == dotdot.span.end;
+        if inclusive {
+            self.advance();
+        }
+        let end = self.parse_expression(MIN_PREC);
+        let body = self.parse_block_expr();
+        let span = Span::new(for_kw.span.start, body.span().end);
+        Expr::For {
+            var,
+            start: Box::new(start),
+            end: Box::new(end),
+            inclusive,
             body: Box::new(body),
             span,
         }
@@ -1397,6 +1476,25 @@ fn token_to_binop(t: TokenKind) -> Option<BinOp> {
     })
 }
 
+/// Maps an assignment-operator token to its desugaring.
+///
+/// Returns `Some(None)` for a plain `=`, `Some(Some(op))` for a compound
+/// assignment `<op>=` (which the parser desugars into
+/// `target = target <op> value`), and `None` when `t` is not an assignment
+/// operator. Only the arithmetic compounds the lexer emits are recognised
+/// (`+=`, `-=`, `*=`, `/=`, `%=`).
+fn token_to_assign_op(t: TokenKind) -> Option<Option<BinOp>> {
+    Some(match t {
+        TokenKind::Eq => None,
+        TokenKind::PlusEq => Some(BinOp::Add),
+        TokenKind::MinusEq => Some(BinOp::Sub),
+        TokenKind::StarEq => Some(BinOp::Mul),
+        TokenKind::SlashEq => Some(BinOp::Div),
+        TokenKind::PercentEq => Some(BinOp::Mod),
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_expr;
@@ -2005,6 +2103,93 @@ mod tests {
             assert!(matches!(init.as_ref().unwrap(), Expr::Match { .. }));
         } else {
             panic!("expected Let");
+        }
+    }
+}
+
+#[cfg(test)]
+mod assign_tests {
+    use super::{parse_expr, parse_source};
+    use capy_ast::{BinOp, Expr};
+
+    #[test]
+    fn simple_assignment_parses() {
+        let r = parse_expr("x = 1");
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        if let Expr::Assign { target, value, .. } = &r.expr {
+            assert!(matches!(target.as_ref(), Expr::Ident(_)));
+            assert!(matches!(value.as_ref(), Expr::Int { .. }));
+        } else {
+            panic!("expected Assign, got {:?}", r.expr);
+        }
+    }
+
+    #[test]
+    fn assignment_binds_looser_than_arithmetic() {
+        // `x = 1 + 2` parses as `x = (1 + 2)`.
+        let r = parse_expr("x = 1 + 2");
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        if let Expr::Assign { value, .. } = &r.expr {
+            assert!(matches!(value.as_ref(), Expr::Binary { op: BinOp::Add, .. }));
+        } else {
+            panic!("expected Assign, got {:?}", r.expr);
+        }
+    }
+
+    #[test]
+    fn assignment_is_right_associative() {
+        // `a = b = c` parses as `a = (b = c)`.
+        let r = parse_expr("a = b = c");
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        if let Expr::Assign { value, .. } = &r.expr {
+            assert!(
+                matches!(value.as_ref(), Expr::Assign { .. }),
+                "rhs should nest"
+            );
+        } else {
+            panic!("expected Assign, got {:?}", r.expr);
+        }
+    }
+
+    #[test]
+    fn compound_assignment_desugars() {
+        // `x += 1` desugars to `x = (x + 1)`: the inner binary's left
+        // operand is the assignment target.
+        let r = parse_expr("x += 1");
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        if let Expr::Assign { value, .. } = &r.expr {
+            if let Expr::Binary { op, lhs, .. } = value.as_ref() {
+                assert_eq!(*op, BinOp::Add);
+                assert!(matches!(lhs.as_ref(), Expr::Ident(_)));
+            } else {
+                panic!("expected desugared Binary, got {:?}", value);
+            }
+        } else {
+            panic!("expected Assign, got {:?}", r.expr);
+        }
+    }
+
+    #[test]
+    fn assignment_statement_parses_cleanly() {
+        let r = parse_source("fn main() { let x = 0; x = 1; }\n");
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+    }
+
+    #[test]
+    fn for_loop_parses_exclusive_and_inclusive() {
+        let r = parse_expr("for i in 0..3 { i }");
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        if let Expr::For { inclusive, .. } = &r.expr {
+            assert!(!*inclusive);
+        } else {
+            panic!("expected For, got {:?}", r.expr);
+        }
+        let r2 = parse_expr("for i in 0..=3 { i }");
+        assert!(r2.diagnostics.is_empty(), "{:?}", r2.diagnostics);
+        if let Expr::For { inclusive, .. } = &r2.expr {
+            assert!(*inclusive);
+        } else {
+            panic!("expected For, got {:?}", r2.expr);
         }
     }
 }
