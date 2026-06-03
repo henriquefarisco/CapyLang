@@ -10,6 +10,117 @@ Slice identifiers (e.g. **S1**, **S2**) refer to the roadmap captured in
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-06-02
+
+### Added
+
+- **S6.3c — struct construction + `match` struct patterns (frontend +
+  emitter).** Completes S6.3 so `enum` and `struct` values both
+  round-trip construct → destructure, with **no new opcodes or wire
+  change**. New AST node `Expr::StructLit { path, fields, span }` and its
+  `StructLitField` companion. The parser gains a `no_struct_literal`
+  context: `Path { ... }` is a struct literal everywhere **except** the
+  head of `if` / `while` / `match` and the bounds of `for` (where the `{`
+  opens a block); the suppression is reset inside every delimiter (parens,
+  call args, array elements, index, block bodies, struct-literal field
+  values and `match` arms), so `if f(P { x: 1 }) { .. }` still parses the
+  inner literal. Pass 0 registers each `struct`'s tag and declared field
+  order; a struct literal lowers its initialisers **reordered into
+  declaration order** then `MakeAggregate(tag, field_count)` (so
+  `Point { y: 2, x: 1 }` stores `x` at field 0); a `match` `Struct`
+  pattern lowers to a `GetTag` test plus per-field `GetField` resolved by
+  field name (shorthand `Point { x }` binds `x`; `..` ignores unlisted
+  fields). `struct` items now emit no diagnostic (previously `E0002`).
+  Field-access `p.x` stays deferred to the type checker.
+  - **Surface**: `capy_ast::Expr::StructLit` + `StructLitField` (with
+    `dump_expr` `StructLit` / `LitField` rendering); `capy_parser`
+    `no_struct_literal` field + `parse_head_expr` / `parse_delimited_expr`
+    / `parse_struct_literal_body`; `capy_emitter` struct registry
+    (`StructLayout`), `emit_struct_lit`, `emit_tag_eq_test`,
+    `struct_field_index` and the `Pattern::Struct` lowering. No
+    `capy-bytecode` / `capy-vm` change.
+  - **Tests**: 8 parser unit tests (`struct_lit_tests`: literal / shorthand
+    / qualified path parsing + `if` / `while` / `match`-head regression
+    guards + struct-literal-inside-block / -call-args); 1 emitter
+    instruction test (field reordering); 6 VM end-to-end tests
+    (construct + destructure, field reordering, literal field sub-pattern
+    with fall-through, aggregate-valued construction, struct inside an
+    `if` body, struct + enum sharing the tag space).
+  - **Validation note**: the struct-literal parser change is the
+    highest-risk part — the 23 lexer + 33 parser golden fixtures and the
+    control-flow source fixtures must be re-run externally to confirm no
+    regression in existing parses.
+  - **Decoupling preserved**: additive AST / parser / emitter growth
+    within v0; the 32-byte header, opcode set and section tags untouched.
+
+- **S6.3b — enum construction + `match` variant lowering (emitter).**
+  Builds the frontend half of S6.3 on top of the S6.3a value model, with
+  **no new opcodes or wire change**. A pass-0 registry over `Item::Enum`
+  assigns every variant a wire-opaque, emitter-internal `tag` (never
+  serialised). Construction lowers syntactically: a unit variant written
+  as a path (`Color::Red`) becomes `MakeAggregate(tag, 0)`; a tuple
+  variant call (`Some(5)`, or `Color::Pair(a, b)`) emits its arguments
+  then `MakeAggregate(tag, argc)` — `emit_call` consults the registry
+  before the `fn` / `import` resolution so a variant callee wins. `match`
+  gains two pattern arms: `Pattern::Path` (unit variant) lowers to a
+  `LoadLocal scrut; GetTag; LoadConst Int(tag); Eq; JumpIfFalse next`
+  discriminant test, and `Pattern::TupleStruct` (`Some(x)`, `Pair(1, b)`)
+  adds, after the tag test, a per-field `GetField` extraction into a
+  fresh local that the sub-pattern recurses on (literal sub-patterns
+  test the field, identifier sub-patterns bind it). `enum` declarations
+  now emit no diagnostic (previously `E0002`).
+  - **Surface**: `capy_emitter` only — `ModuleEmitter` gains a
+    `variant_registry`; `FunctionEmitter` gains the `extract_field` /
+    `emit_variant_tag_test` helpers and lowers `Expr::Path` /
+    `Expr::Call` variant construction plus the `Path` / `TupleStruct`
+    `match` arms. No `capy-bytecode` / `capy-vm` change. v0 resolution
+    is by variant name (path last segment); unit variants are written
+    qualified until a name resolver lands (see `docs/structs-enums.md`).
+    `struct` literals and `Struct` patterns stay `E0010` (S6.3c).
+  - **Tests**: 4 emitter instruction-level tests (unit + tuple
+    construction shapes, enum-emits-no-code, `match` uses `GetTag` /
+    `GetField`); 7 VM end-to-end tests (unit-variant dispatch, bound
+    unit variant, tuple payload binding, two-field binding, literal
+    field sub-pattern with fall-through, aggregate-valued construction,
+    wildcard fall-through).
+  - **Decoupling preserved**: purely additive emitter growth within v0;
+    the 32-byte header, opcode set and section tags are untouched.
+
+- **S6.3a — tagged-aggregate value model (struct / enum at runtime,
+  bytecode + VM).** The second composite runtime value, building directly
+  on the S6.2 array machinery. `Value::Aggregate { tag, fields }` is a
+  reference-semantics `Rc<RefCell<Vec<Value>>>` handle (aliases share one
+  backing store; opaque to bytecode) representing a struct instance or an
+  enum variant; `tag` is an emitter-assigned, wire-opaque discriminant the
+  VM only stores and compares. Three additive opcodes: `make_aggregate`
+  (0x64, `U32U32` immediate `(tag, field_count)`), `get_field` (0x65,
+  `U32` field index) and `get_tag` (0x66). The new
+  `V0018 FIELD_OUT_OF_BOUNDS` trap covers an out-of-range `get_field`
+  index (a `get_field` / `get_tag` on a non-aggregate still traps with
+  `V0005 TYPE_MISMATCH`). This sub-slice is **bytecode + VM only** —
+  testable by building modules directly, with no frontend changes; enum
+  construction, struct literals and the `match` tuple-struct / struct /
+  path lowering follow in S6.3b / S6.3c and add no new opcodes.
+  - **Surface**: `Opcode::{MakeAggregate,GetField,GetTag}` and the
+    matching `Instruction` variants (`MakeAggregate { tag, field_count }`,
+    `GetField(u32)`, `GetTag`); `Value::Aggregate`; `VmError::FieldOutOfBounds`
+    + the `V_FIELD_OUT_OF_BOUNDS` constant; `docs/bytecode-v0.md`,
+    `docs/compatibility.md` and `docs/structs-enums.md` updated; full
+    design in `docs/structs-enums.md`.
+  - **Tests**: opcode round-trip + uniqueness arrays extended; instruction
+    codec round-trip, a truncated-`U32U32`-immediate rejection and a
+    disassembly format test; verifier stack-effect tests (`make_aggregate`
+    underflow + a balanced build-and-read program); VM end-to-end tests for
+    `make_aggregate`/`get_tag`, `get_field`, the `V0018` and
+    `V0005` traps, and an aggregate that composes with locals + arithmetic
+    (`#{0}(3, 4)` → `p.x + p.y` → `7`); the VM error catalogue's
+    every-variant display test extended.
+  - **Review fix**: `V_INDEX_OUT_OF_BOUNDS` (V0017, added by S6.2) was
+    never re-exported from the `capy-vm` crate root; both it and the new
+    `V_FIELD_OUT_OF_BOUNDS` are now public.
+  - **Decoupling preserved**: additive opcode growth within v0; the
+    32-byte header is untouched and no body section changed.
+
 ## [0.1.7] - 2026-05-29
 
 ### Added
@@ -1323,7 +1434,8 @@ lexer in Rust with byte-precise spans and recoverable diagnostics.
 - Bumped `VERSION` from `0.0.1` to `0.1.0` and refreshed `README.md` with
   an *Active layout* section reflecting the new Rust crates.
 
-[Unreleased]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.3...v0.1.6
 [0.1.3]: https://github.com/henriquefarisco/CapyLang/compare/v0.1.2...v0.1.3

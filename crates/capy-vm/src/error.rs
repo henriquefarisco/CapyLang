@@ -58,6 +58,10 @@ pub const V_HOST_CALL_FAILED: &str = "V0016";
 /// `ArrayGet` / `ArraySet` referenced an index outside the array's
 /// `0..len` range (or a negative index). Bounds-checked and fail-closed.
 pub const V_INDEX_OUT_OF_BOUNDS: &str = "V0017";
+/// `GetField` referenced a field index outside the aggregate's
+/// `0..len` range. Bounds-checked and fail-closed. Kept distinct from
+/// the array-specific `V0017` so messages stay precise.
+pub const V_FIELD_OUT_OF_BOUNDS: &str = "V0018";
 
 /// Errors that the VM produces during loading or execution. All
 /// variants are fail-closed: the VM never panics on malformed bytecode
@@ -140,6 +144,11 @@ pub enum VmError {
         index: i64,
         len: usize,
     },
+    FieldOutOfBounds {
+        pc: u32,
+        index: u32,
+        len: usize,
+    },
 }
 
 impl VmError {
@@ -164,6 +173,7 @@ impl VmError {
             Self::UnresolvedHostImport { .. } => V_UNRESOLVED_HOST_IMPORT,
             Self::HostCallFailed { .. } => V_HOST_CALL_FAILED,
             Self::IndexOutOfBounds { .. } => V_INDEX_OUT_OF_BOUNDS,
+            Self::FieldOutOfBounds { .. } => V_FIELD_OUT_OF_BOUNDS,
         }
     }
 
@@ -192,7 +202,8 @@ impl VmError {
             | Self::UnknownHostImport { pc, .. }
             | Self::UnresolvedHostImport { pc, .. }
             | Self::HostCallFailed { pc, .. }
-            | Self::IndexOutOfBounds { pc, .. } => Some(*pc),
+            | Self::IndexOutOfBounds { pc, .. }
+            | Self::FieldOutOfBounds { pc, .. } => Some(*pc),
             Self::BudgetExhausted { .. }
             | Self::UnknownFunction { .. }
             | Self::MalformedModule { .. } => None,
@@ -317,6 +328,10 @@ impl fmt::Display for VmError {
             Self::IndexOutOfBounds { pc, index, len } => write!(
                 f,
                 "[{code}] array index {index} out of bounds (len={len}) at pc=0x{pc:04x}"
+            ),
+            Self::FieldOutOfBounds { pc, index, len } => write!(
+                f,
+                "[{code}] field index {index} out of bounds (len={len}) at pc=0x{pc:04x}"
             ),
         }
     }
@@ -486,6 +501,14 @@ mod tests {
                     len: 3,
                 },
                 V_INDEX_OUT_OF_BOUNDS,
+            ),
+            (
+                VmError::FieldOutOfBounds {
+                    pc: 0,
+                    index: 5,
+                    len: 2,
+                },
+                V_FIELD_OUT_OF_BOUNDS,
             ),
         ];
         for (err, code) in samples {

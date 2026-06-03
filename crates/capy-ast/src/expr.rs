@@ -155,10 +155,32 @@ pub enum Expr {
         value: Box<Expr>,
         span: Span,
     },
+    /// Struct-literal expression `Path { f0: v0, f1, ... }` (S6.3c).
+    ///
+    /// Field shorthand `Point { x }` records `value` as `Expr::Ident(x)`.
+    /// Parsed only outside a "no-struct-literal" context: in the head of
+    /// `if` / `while` / `match` and the bounds of `for`, `Path { ... }`
+    /// is a path expression followed by a block, not a literal. The
+    /// emitter reorders the field initialisers into the struct's declared
+    /// field order before `MakeAggregate`.
+    StructLit {
+        path: Vec<Ident>,
+        fields: Vec<StructLitField>,
+        span: Span,
+    },
     /// Placeholder produced by parser error recovery. The `span` points at
     /// the offending input. Always paired with at least one parse
     /// diagnostic.
     Error { span: Span },
+}
+
+/// A single field initialiser of an [`Expr::StructLit`]: `name: value`,
+/// or the shorthand `name` (which records `value` as `Expr::Ident(name)`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructLitField {
+    pub name: Ident,
+    pub value: Expr,
+    pub span: Span,
 }
 
 /// A single arm of a [`Expr::Match`]: `<pattern> [if <guard>] => <body>`.
@@ -295,6 +317,7 @@ impl Expr {
             | Self::Match { span, .. }
             | Self::Array { span, .. }
             | Self::Assign { span, .. }
+            | Self::StructLit { span, .. }
             | Self::Error { span } => *span,
             Self::Ident(id) => id.span,
         }

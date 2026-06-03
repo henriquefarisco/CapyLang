@@ -100,8 +100,14 @@ fn bitwise_operators_evaluate() {
     assert_eq!(run_source("fn main() { 6 & 3 }\n").unwrap(), Value::Int(2));
     assert_eq!(run_source("fn main() { 6 | 1 }\n").unwrap(), Value::Int(7));
     assert_eq!(run_source("fn main() { 6 ^ 3 }\n").unwrap(), Value::Int(5));
-    assert_eq!(run_source("fn main() { 1 << 4 }\n").unwrap(), Value::Int(16));
-    assert_eq!(run_source("fn main() { 32 >> 2 }\n").unwrap(), Value::Int(8));
+    assert_eq!(
+        run_source("fn main() { 1 << 4 }\n").unwrap(),
+        Value::Int(16)
+    );
+    assert_eq!(
+        run_source("fn main() { 32 >> 2 }\n").unwrap(),
+        Value::Int(8)
+    );
 }
 
 #[test]
@@ -646,4 +652,136 @@ fn main() { \
     } \
 }\n";
     assert_eq!(run_source(src).unwrap(), Value::Int(42));
+}
+
+// --- S6.3b: enum construction + match on variants ----------------------
+
+#[test]
+fn unit_variant_match_selects_arm_by_tag() {
+    let src = "enum Light { Red, Yellow, Green }\n\
+               fn main() { match Light::Green { \
+                   Light::Red => 1, Light::Yellow => 2, Light::Green => 3 } }\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(3));
+}
+
+#[test]
+fn unit_variant_can_be_bound_then_matched() {
+    let src = "enum Dir { N, S, E, W }\n\
+               fn main() { let d = Dir::S; match d { \
+                   Dir::N => 0, Dir::S => 1, Dir::E => 2, Dir::W => 3 } }\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(1));
+}
+
+#[test]
+fn tuple_variant_construct_and_bind_payload() {
+    // `Box::Val(7)` builds a 1-field aggregate; the matching arm binds
+    // the payload to `x`.
+    let src = "enum Box { Val(Int), Empty }\n\
+               fn main() { match Box::Val(7) { \
+                   Box::Val(x) => x, Box::Empty => 0 } }\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(7));
+}
+
+#[test]
+fn tuple_variant_with_two_fields_binds_both() {
+    let src = "enum Pair { Both(Int, Int), Neither }\n\
+               fn main() { match Pair::Both(3, 4) { \
+                   Pair::Both(a, b) => a + b, Pair::Neither => 0 } }\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(7));
+}
+
+#[test]
+fn tuple_variant_literal_subpattern_tests_the_field() {
+    // First arm matches only when the payload equals the literal `1`.
+    let matching = "enum Tag { T(Int) }\n\
+                    fn main() { match Tag::T(1) { Tag::T(1) => 100, Tag::T(x) => x } }\n";
+    assert_eq!(run_source(matching).unwrap(), Value::Int(100));
+    // When the field differs, control falls through to the binding arm.
+    let falling = "enum Tag { T(Int) }\n\
+                   fn main() { match Tag::T(2) { Tag::T(1) => 100, Tag::T(x) => x } }\n";
+    assert_eq!(run_source(falling).unwrap(), Value::Int(2));
+}
+
+#[test]
+fn unit_variant_construction_yields_tagged_aggregate() {
+    // A bare construction expression evaluates to the aggregate value.
+    let src = "enum Box { Val(Int), Empty }\nfn main() { Box::Val(9) }\n";
+    match run_source(src).unwrap() {
+        Value::Aggregate { tag, fields } => {
+            assert_eq!(tag, 0, "Val is the first declared variant");
+            assert_eq!(*fields.borrow(), vec![Value::Int(9)]);
+        }
+        other => panic!("expected aggregate, got {other:?}"),
+    }
+}
+
+#[test]
+fn match_falls_through_to_wildcard_when_no_variant_matches() {
+    let src = "enum Light { Red, Yellow, Green }\n\
+               fn main() { match Light::Red { Light::Green => 1, _ => 99 } }\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(99));
+}
+
+// --- S6.3c: struct construction + match on struct patterns -------------
+
+#[test]
+fn struct_literal_constructs_and_destructures() {
+    let src = "struct Point { x: Int, y: Int }\n\
+               fn main() { let p = Point { x: 3, y: 4 }; \
+                   match p { Point { x, y } => x + y } }\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(7));
+}
+
+#[test]
+fn struct_literal_fields_are_reordered_to_declaration_order() {
+    // The literal lists `y` before `x`, but the emitter stores them in the
+    // declared order [x, y], so field 0 is `x` (3) and field 1 is `y` (4).
+    let src = "struct Point { x: Int, y: Int }\n\
+               fn main() { let p = Point { y: 4, x: 3 }; \
+                   match p { Point { x, y } => x - y } }\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(-1));
+}
+
+#[test]
+fn struct_pattern_literal_field_tests_then_falls_through() {
+    let matching = "struct P { a: Int }\n\
+                    fn main() { let p = P { a: 5 }; \
+                        match p { P { a: 5 } => 1, P { a } => a } }\n";
+    assert_eq!(run_source(matching).unwrap(), Value::Int(1));
+    let falling = "struct P { a: Int }\n\
+                   fn main() { let p = P { a: 9 }; \
+                       match p { P { a: 5 } => 1, P { a } => a } }\n";
+    assert_eq!(run_source(falling).unwrap(), Value::Int(9));
+}
+
+#[test]
+fn struct_literal_yields_tagged_aggregate() {
+    let src = "struct Q { m: Int, n: Int }\nfn main() { Q { m: 1, n: 2 } }\n";
+    match run_source(src).unwrap() {
+        Value::Aggregate { tag, fields } => {
+            assert_eq!(tag, 0, "Q is the first declared aggregate");
+            assert_eq!(*fields.borrow(), vec![Value::Int(1), Value::Int(2)]);
+        }
+        other => panic!("expected aggregate, got {other:?}"),
+    }
+}
+
+#[test]
+fn struct_literal_composes_with_control_flow_blocks() {
+    // Exercises the `no_struct_literal` reset inside a block body: the
+    // struct literal lives in the `if` branch, not its head.
+    let src = "struct Pt { x: Int, y: Int }\n\
+               fn main() { if true { let p = Pt { x: 1, y: 2 }; \
+                   match p { Pt { x, y } => x + y } } else { 0 } }\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(3));
+}
+
+#[test]
+fn structs_and_enums_share_the_tag_space() {
+    // A struct and an enum variant declared in the same module get
+    // distinct tags from the shared counter, so matching stays correct.
+    let src = "struct S { v: Int }\nenum E { A, B }\n\
+               fn main() { let s = S { v: 7 }; \
+                   match s { S { v } => v } }\n";
+    assert_eq!(run_source(src).unwrap(), Value::Int(7));
 }

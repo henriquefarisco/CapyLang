@@ -89,8 +89,9 @@ Immediates fall into three shapes:
 - `U32`    — 4-byte little-endian unsigned (used for indices).
 - `I32`    — 4-byte little-endian signed (used for relative jump offsets).
 - `U32U32` — two consecutive 4-byte little-endian unsigned values; used
-  by `call` to carry `(fn_idx, argc)` and by `host_call` to carry
-  `(import_idx, argc)`.
+  by `call` to carry `(fn_idx, argc)`, by `host_call` to carry
+  `(import_idx, argc)` and by `make_aggregate` to carry
+  `(tag, field_count)`.
 
 For `Jump` / `JumpIfFalse` the offset is computed from the byte that
 follows the full instruction (PC after decoding the immediate); offset
@@ -129,6 +130,9 @@ follows the full instruction (PC after decoding the immediate); offset
 | 0x61 | `array_get`      | —         | `arr idx -> arr[idx]` (bounds-checked)  |
 | 0x62 | `array_set`      | —         | `arr idx val -> arr` (writes in place)  |
 | 0x63 | `array_len`      | —         | `arr -> len(arr)` (Int)                 |
+| 0x64 | `make_aggregate` | `U32U32`  | `v0..vN-1 -> agg` (`tag`, N fields)     |
+| 0x65 | `get_field`      | `U32`     | `agg -> agg.fields[i]` (bounds-checked) |
+| 0x66 | `get_tag`        | —         | `agg -> tag` (Int discriminant)         |
 | 0x70 | `jump`           | `I32`     | unchanged (PC += imm)                   |
 | 0x71 | `jump_if_false`  | `I32`     | `a -> ` (jumps if `!a`)                 |
 | 0x80 | `call`           | `U32U32`  | `arg0..argN-1 -> ret` (transfer to fn)  |
@@ -165,10 +169,20 @@ modulo 64). The aggregate opcodes `make_array` / `array_get` /
 `array_set` / `array_len` (0x60-0x63) were added by S6.2 (see
 `docs/aggregates.md`) and operate on arrays: a non-array or non-int
 operand traps with `V0005 TYPE_MISMATCH`, and an out-of-range or negative
-index traps with `V0017 INDEX_OUT_OF_BOUNDS`. The rest of the `0x60-0x6F`
-block stays reserved for future aggregate ops (tuple / struct in S6.3).
-`match` (S2.2b) parses today but its lowering will introduce additional
-opcodes that append to this table in a future slice.
+index traps with `V0017 INDEX_OUT_OF_BOUNDS`. The tagged-aggregate opcodes
+`make_aggregate` / `get_field` / `get_tag` (0x64-0x66) were added by S6.3a
+(see `docs/structs-enums.md`): `make_aggregate (tag, field_count)` pops
+`field_count` values (field `0` is the first popped, in source order) and
+pushes a tagged aggregate that represents a struct instance or an enum
+variant; `get_field i` clones field `i` out (an out-of-range field index
+traps with `V0018 FIELD_OUT_OF_BOUNDS`); `get_tag` pushes the aggregate's
+discriminant as an `Int` so a lowered `match` can branch on it. `tag` is
+emitter-assigned and wire-opaque — the VM only stores and compares it.
+`get_field` / `get_tag` on a non-aggregate trap with `V0005
+TYPE_MISMATCH`. The rest of the `0x60-0x6F` block stays reserved for
+future aggregate ops (e.g. `make_tuple`, in-place field writes). `match`
+(S2.2b) parses tuple-struct / struct / path patterns today; lowering them
+onto `get_tag` / `get_field` is S6.3b / S6.3c and adds no new opcodes.
 
 ### `imports` (0x03)
 

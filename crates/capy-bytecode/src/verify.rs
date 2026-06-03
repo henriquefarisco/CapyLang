@@ -332,6 +332,8 @@ fn required_inputs(ins: Instruction) -> u32 {
         | Instruction::Not
         | Instruction::BitNot
         | Instruction::ArrayLen
+        | Instruction::GetField(_)
+        | Instruction::GetTag
         | Instruction::JumpIfFalse(_)
         | Instruction::Return => 1,
         Instruction::Add
@@ -353,6 +355,7 @@ fn required_inputs(ins: Instruction) -> u32 {
         | Instruction::ArrayGet => 2,
         Instruction::ArraySet => 3,
         Instruction::MakeArray(n) => n,
+        Instruction::MakeAggregate { field_count, .. } => field_count,
         Instruction::Call { argc, .. } | Instruction::HostCall { argc, .. } => argc,
     }
 }
@@ -393,6 +396,9 @@ fn produced_outputs(ins: Instruction) -> u32 {
         | Instruction::ArrayGet
         | Instruction::ArraySet
         | Instruction::ArrayLen
+        | Instruction::MakeAggregate { .. }
+        | Instruction::GetField(_)
+        | Instruction::GetTag
         | Instruction::Call { .. }
         | Instruction::HostCall { .. } => 1,
     }
@@ -665,6 +671,46 @@ mod tests {
             } => {
                 assert_eq!(argc, 1);
                 assert_eq!(callee_locals_count, 0);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn aggregate_build_and_get_field_passes() {
+        // load_const 0; load_const 1; make_aggregate(tag=0, 2);
+        // get_field 0; return — net stack effect leaves one value.
+        let ins = vec![
+            Instruction::LoadConst(0),
+            Instruction::LoadConst(1),
+            Instruction::MakeAggregate {
+                tag: 0,
+                field_count: 2,
+            },
+            Instruction::GetField(0),
+            Instruction::Return,
+        ];
+        // Peak depth is 2 (both fields pushed before make_aggregate).
+        assert_eq!(verify(&ins, 0, &[]).unwrap(), 2);
+    }
+
+    #[test]
+    fn aggregate_underflow_when_fields_missing_traps() {
+        // make_aggregate wants 2 operands but the stack only has 1.
+        let ins = vec![
+            Instruction::LoadConst(0),
+            Instruction::MakeAggregate {
+                tag: 0,
+                field_count: 2,
+            },
+            Instruction::Return,
+        ];
+        match verify(&ins, 0, &[]).unwrap_err() {
+            VerifyError::StackUnderflow {
+                required, depth, ..
+            } => {
+                assert_eq!(required, 2);
+                assert_eq!(depth, 1);
             }
             other => panic!("unexpected: {other:?}"),
         }

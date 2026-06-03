@@ -6,8 +6,8 @@ benchmarks such as Snake / Asteroids running on CapyOS, gated by CapyOS
 Etapa 15) and records, per slice, the dependencies, the acceptance
 criteria and the validation gate.
 
-- CapyLang version: `0.1.7`
-- CapyOS core pinned: `0.8.0-alpha.261+20260529` (see `docs/compatibility.md`)
+- CapyLang version: `0.1.8`
+- CapyOS core pinned: `0.8.0-alpha.262+20260602` (see `docs/compatibility.md`)
 - Authority order for decisions: `docs/compatibility.md` -> `docs/integration.md`
   -> `docs/lexer.md` -> `docs/grammar.ebnf` -> `docs/bytecode-v0.md` ->
   this file -> `CHANGELOG.md` -> CapyOS cross-repo docs.
@@ -59,6 +59,9 @@ These slices are implemented in the working tree but must pass
 | - | `Str + Str` concatenation in the VM (`Add` opcode, no wire change) |
 | S12 | `capyc` CLI completed: `check` (rustc-style diagnostics) and `repl` |
 | S6.2 | aggregate value model — arrays (`Value::Array`, opcodes 0x60-0x63, `V0017`), literals / indexing / indexed assignment |
+| S6.3a | tagged-aggregate value model (`Value::Aggregate { tag, fields }`, opcodes `make_aggregate`/`get_field`/`get_tag` 0x64-0x66, `V0018 FIELD_OUT_OF_BOUNDS`) — bytecode/VM only, no frontend yet |
+| S6.3b | enum support in the emitter — variant tag registry, unit/tuple construction (`Path` / `Call` → `MakeAggregate`), `match` `Path` / `TupleStruct` lowering (`GetTag` test + recursive `GetField`); no new opcodes |
+| S6.3c | struct support — `Expr::StructLit` AST + parser (with the `no_struct_literal` head context), struct field-layout registry, literal construction (reordered to declared order), `match` `Struct` pattern lowering; no new opcodes |
 
 ## Remaining slices (ordered)
 
@@ -87,8 +90,12 @@ whole sequence converges on the Snake / Asteroids benchmark goal.
   - Depends on: S6.2.
   - Acceptance: construct + destructure round-trip; `match` arms bind
     fields; end-to-end tests; goldens.
-  - Staging: S6.3a (value model + opcodes), S6.3b (enums + `Path` /
-    `TupleStruct` match), S6.3c (`struct` literals + `Struct` match).
+  - Staging: **S6.3a (value model + opcodes + verifier + VM + `V0018`),
+    S6.3b (enum construction + `match` `Path` / `TupleStruct`) and S6.3c
+    (`struct` literals + `Struct` match, including the `no_struct_literal`
+    parser context) — all implemented, pending external validation.**
+    S6.3 is now feature-complete (construct + destructure for enums and
+    structs); field-access `p.x` stays deferred to the type checker.
   - Design / detail: `docs/structs-enums.md`.
 
 - **S2.3c - `trait` / `impl` + extended type forms** (tuple, function,

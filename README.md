@@ -1,6 +1,6 @@
 # CapyLang
 
-Version: 0.1.7
+Version: 0.1.8
 
 CapyLang is the external language-core repository for CapyOS.
 
@@ -106,10 +106,10 @@ instruction set, with wrapping i64 arithmetic, IEEE-754 floats,
 strict same-type binary ops (with `Int ↔ Float` promotion across
 the numeric category), strict `Bool` for `JumpIfFalse`/`Not`, a
 per-call instruction budget (default `1_000_000`) and a fail-closed
-error catalogue `V0001`-`V0017` (S5b.3 added `V0011`-`V0013` for
+error catalogue `V0001`-`V0018` (S5b.3 added `V0011`-`V0013` for
 calls; S7 added `V0014`-`V0016` for host calls; S6.2 added `V0017`
-`INDEX_OUT_OF_BOUNDS`). No JIT, no syscalls, no host pointers, no
-global state.
+`INDEX_OUT_OF_BOUNDS`; S6.3a added `V0018` `FIELD_OUT_OF_BOUNDS`). No
+JIT, no syscalls, no host pointers, no global state.
 
 Slice **S5c (static stack-balance verifier)** runs at VM load time
 (`Vm::from_module`) and statically rejects any function whose
@@ -185,6 +185,40 @@ access is bounds-checked and a bad index traps with `V0017
 INDEX_OUT_OF_BOUNDS`. This unblocks variable-length data such as a grid
 or the snake body.
 
+Slice **S6.3a (tagged aggregates)** adds the runtime value model for
+`struct` / `enum`: `Value::Aggregate { tag, fields }` (same
+reference-semantics `Rc<RefCell<Vec<Value>>>` backing as arrays) plus
+three opcodes (`make_aggregate` 0x64, `get_field` 0x65, `get_tag` 0x66).
+`make_aggregate (tag, field_count)` builds a struct instance or enum
+variant from the top `field_count` operands; `get_field` clones a field
+out (out-of-range traps with `V0018 FIELD_OUT_OF_BOUNDS`); `get_tag`
+pushes the opaque discriminant so a lowered `match` can branch. This
+sub-slice is bytecode + VM only — the frontend/emitter lowering
+(enum construction, struct literals, the `match` aggregate arms) lands
+in S6.3b / S6.3c with no new opcodes.
+
+Slice **S6.3b (enum construction + `match`)** wires the emitter onto that
+value model. An `enum` declaration registers each variant's tag; a
+unit variant written as a path (`Color::Red`) lowers to
+`make_aggregate(tag, 0)`, a tuple variant call (`Some(5)`) emits its
+arguments then `make_aggregate(tag, argc)`, and `match` arms for unit
+(`Color::Red`) and tuple (`Some(x)`) variants lower to a `get_tag`
+discriminant test plus recursive `get_field` extraction that binds or
+tests each payload. No new opcodes; `struct` literals and `Struct`
+patterns follow in S6.3c. So `enum Box { Val(Int), Empty }` with
+`match Box::Val(7) { Box::Val(x) => x, Box::Empty => 0 }` now evaluates
+to `7` end-to-end.
+
+Slice **S6.3c (structs)** completes the data model. A `struct` declaration
+registers a field layout; a struct literal `Point { y: 2, x: 1 }` is
+lowered with its fields reordered into declaration order, and a `match`
+`Struct` pattern destructures by field name. The parser only treats
+`Path { ... }` as a struct literal outside the head of `if` / `while` /
+`match` and the bounds of `for` (where the `{` opens a block) — Rust's
+rule. So `struct Point { x: Int, y: Int }` with
+`let p = Point { x: 3, y: 4 }; match p { Point { x, y } => x + y }`
+evaluates to `7`. Field access `p.x` stays deferred to the type checker.
+
 ## Scope owned by this repository
 
 - Parser and syntax validation.
@@ -204,7 +238,7 @@ or the snake body.
 
 ## CapyOS integration contract
 
-CapyOS core pinned: `0.8.0-alpha.261+20260529`.
+CapyOS core pinned: `0.8.0-alpha.262+20260602`.
 
 CapyOS integration must follow:
 
@@ -246,7 +280,7 @@ crates/
       functions.rs        # FunctionTable / Function (name, locals, opaque code)
       imports.rs          # ImportTable / Import (module::symbol)
       debug.rs            # DebugInfo / DebugEntry (bytecode -> source span)
-      opcode.rs           # Opcode enum (24 frozen byte values) + Imm shape
+      opcode.rs           # Opcode enum (39 frozen byte values) + Imm shape
       instruction.rs      # Instruction enum + encode/decode/disassemble_text
       cursor.rs           # private bounds-checked byte cursor
       error.rs            # BytecodeError + B0001..B0012 codes
@@ -263,9 +297,9 @@ crates/
   capy-vm/                # S6.1 - deterministic stack-machine interpreter
     src/
       lib.rs              # public API re-exports
-      value.rs            # Value (None/Bool/Int/Float/Str/Array)
+      value.rs            # Value (None/Bool/Int/Float/Str/Array/Aggregate)
       execute.rs          # Vm loader + interpreter loop
-      error.rs            # VmError + V0001..V0017 codes
+      error.rs            # VmError + V0001..V0018 codes
     tests/
       end_to_end.rs       # source -> AST -> bytecode -> Value integration tests
   capy-diagnostics/       # S3 - Severity, Code, Label, Diagnostic, SourceMap, render, bridges

@@ -78,6 +78,33 @@ struct ModuleEmitter {
     /// function-index field; until then the rest are preserved here
     /// for inspection by future tooling.
     debug_per_fn: Vec<Vec<DebugEntry>>,
+    /// Enum-variant name → wire-opaque discriminant `tag`, assigned in
+    /// declaration order by a pre-pass over `Item::Enum` (S6.3b). Both
+    /// construction (`Variant(args)` / unit-variant `Path`) and `match`
+    /// arms resolve a variant's tag through this map. Tags are
+    /// emitter-internal and never serialised (see `docs/structs-enums.md`);
+    /// duplicate variant names keep the first declaration (v0 has no name
+    /// resolver). Keyed by the variant's own name (the last path segment),
+    /// so both `Color::Red` and a bare `Red` resolve identically.
+    variant_registry: HashMap<String, u32>,
+    /// Struct name → declared layout (tag + field order), assigned in
+    /// declaration order by the same pass-0 pre-pass (S6.3c). Struct
+    /// construction reorders a literal's fields into this declared order;
+    /// `match` `Struct` patterns resolve a field name to its index here.
+    struct_registry: HashMap<String, StructLayout>,
+    /// Next tag to assign. Shared counter across enum variants (S6.3b)
+    /// and structs (S6.3c) so every aggregate shape has a distinct tag.
+    next_tag: u32,
+}
+
+/// Compile-time layout of a `struct` (S6.3c). `tag` is the wire-opaque
+/// discriminant; `fields` lists the field names in declaration order so
+/// construction can reorder a literal and patterns can resolve a field
+/// name to its aggregate index. Never serialised.
+#[derive(Debug, Clone)]
+struct StructLayout {
+    tag: u32,
+    fields: Vec<String>,
 }
 
 impl ModuleEmitter {
@@ -91,10 +118,43 @@ impl ModuleEmitter {
             fn_index: HashMap::new(),
             emitted: std::collections::HashSet::new(),
             debug_per_fn: Vec::new(),
+            variant_registry: HashMap::new(),
+            struct_registry: HashMap::new(),
+            next_tag: 0,
         }
     }
 
     fn emit_source(&mut self, source: &Source) {
+        // Pass 0: assign a wire-opaque `tag` to every enum variant in
+        // declaration order so construction (`Variant(args)` / unit
+        // `Path`) and `match` arms can resolve the discriminant. Tags
+        // are emitter-internal and never serialised. Duplicate variant
+        // names keep the first declaration (v0 has no name resolver).
+        for stmt in &source.stmts {
+            match stmt {
+                Stmt::Item(Item::Enum(e)) => {
+                    for v in &e.variants {
+                        if !self.variant_registry.contains_key(&v.name.name) {
+                            self.variant_registry
+                                .insert(v.name.name.clone(), self.next_tag);
+                            self.next_tag += 1;
+                        }
+                    }
+                }
+                // Structs (S6.3c) join the same tag space and record their
+                // field order so construction can reorder a literal and
+                // `Struct` patterns can resolve a field to its index.
+                Stmt::Item(Item::Struct(s)) if !self.struct_registry.contains_key(&s.name.name) => {
+                    let tag = self.next_tag;
+                    self.next_tag += 1;
+                    let fields = s.fields.iter().map(|f| f.name.name.clone()).collect();
+                    self.struct_registry
+                        .insert(s.name.name.clone(), StructLayout { tag, fields });
+                }
+                _ => {}
+            }
+        }
+
         // Pass 1: pre-allocate stable indices for every `fn` and
         // `import` item so calls (both intra-module and cross-host) can
         // be resolved regardless of declaration order. Duplicate names
@@ -151,18 +211,14 @@ impl ModuleEmitter {
                 EmitErrorKind::UnsupportedItem { what: "const" },
                 c.span,
             )),
-            Item::Struct(s) => self.errors.push(EmitError::new(
-                EmitErrorKind::UnsupportedItem { what: "struct" },
-                s.span,
-            )),
             Item::TypeAlias(t) => self.errors.push(EmitError::new(
                 EmitErrorKind::UnsupportedItem { what: "type alias" },
                 t.span,
             )),
-            Item::Enum(e) => self.errors.push(EmitError::new(
-                EmitErrorKind::UnsupportedItem { what: "enum" },
-                e.span,
-            )),
+            // `enum` (S6.3b) and `struct` (S6.3c) declarations emit no
+            // code: pass 0 registered their tags / field layouts and
+            // construction + `match` resolve through the registries.
+            Item::Enum(_) | Item::Struct(_) => {}
         }
     }
 
@@ -182,7 +238,13 @@ impl ModuleEmitter {
             return;
         }
         self.emitted.insert(fn_idx);
-        let mut fe = FunctionEmitter::new(&mut self.consts, &self.fn_index, &self.import_index);
+        let mut fe = FunctionEmitter::new(
+            &mut self.consts,
+            &self.fn_index,
+            &self.import_index,
+            &self.variant_registry,
+            &self.struct_registry,
+        );
         // Register parameters as the first locals, in declaration order.
         // `locals[0]` corresponds to the first parameter, matching the
         // `Call` ABI in `docs/bytecode-v0.md`.
@@ -396,6 +458,17 @@ struct FunctionEmitter<'a> {
     /// `emit_call` to lower a call whose callee resolves to an imported
     /// symbol into [`Instruction::HostCall`] addressed by `import_idx`.
     import_index: &'a HashMap<String, u32>,
+    /// Read-only view of the module-level enum-variant-name → tag map
+    /// built by [`ModuleEmitter::emit_source`]'s pass 0 (S6.3b). Used to
+    /// lower variant construction (`Path` / `Call`) to `MakeAggregate`
+    /// and `match` variant patterns (`Path` / `TupleStruct`) to a
+    /// `GetTag` discriminant test.
+    variant_registry: &'a HashMap<String, u32>,
+    /// Read-only view of the module-level struct-name → layout map
+    /// (S6.3c). Used to lower struct-literal construction (reordering a
+    /// literal's fields into declared order) and `match` `Struct`
+    /// patterns (resolving a field name to its aggregate index).
+    struct_registry: &'a HashMap<String, StructLayout>,
     code: Vec<u8>,
     locals: HashMap<String, u32>,
     locals_count: u32,
@@ -420,11 +493,15 @@ impl<'a> FunctionEmitter<'a> {
         consts: &'a mut ConstPoolBuilder,
         fn_index: &'a HashMap<String, u32>,
         import_index: &'a HashMap<String, u32>,
+        variant_registry: &'a HashMap<String, u32>,
+        struct_registry: &'a HashMap<String, StructLayout>,
     ) -> Self {
         Self {
             consts,
             fn_index,
             import_index,
+            variant_registry,
+            struct_registry,
             code: Vec::new(),
             locals: HashMap::new(),
             locals_count: 0,
@@ -598,7 +675,7 @@ impl<'a> FunctionEmitter<'a> {
             Expr::NoneLit { .. } => self.emit_op(Opcode::LoadNone),
             Expr::Ident(id) => self.emit_ident_load(id)?,
             Expr::Paren { inner, .. } => self.emit_expr(inner)?,
-            Expr::Unary { op, operand, span } => {
+            Expr::Unary { op, operand, .. } => {
                 self.emit_expr(operand)?;
                 match op {
                     UnOp::Neg => self.emit_op(Opcode::Neg),
@@ -615,11 +692,25 @@ impl<'a> FunctionEmitter<'a> {
                 ..
             } => self.emit_if(cond, then_branch, else_branch.as_deref())?,
             Expr::Return { value, .. } => self.emit_return(value.as_deref())?,
-            Expr::Path { span, .. } => {
-                return Err(EmitError::new(
-                    EmitErrorKind::UnsupportedExpr { what: "path" },
-                    *span,
-                ));
+            Expr::Path { segments, span } => {
+                // A path whose last segment names a known enum variant
+                // constructs a unit (field-less) aggregate, e.g.
+                // `Color::Red` → `make_aggregate(tag, 0)` (S6.3b).
+                // Anything else stays an unsupported path expression.
+                let name = segments.last().map(|s| s.name.as_str()).unwrap_or("");
+                match self.variant_registry.get(name).copied() {
+                    Some(tag) => {
+                        self.emit_op(Opcode::MakeAggregate);
+                        self.emit_u32(tag);
+                        self.emit_u32(0);
+                    }
+                    None => {
+                        return Err(EmitError::new(
+                            EmitErrorKind::UnsupportedExpr { what: "path" },
+                            *span,
+                        ));
+                    }
+                }
             }
             Expr::Call { callee, args, span } => self.emit_call(callee, args, *span)?,
             Expr::Index { target, index, .. } => {
@@ -670,11 +761,81 @@ impl<'a> FunctionEmitter<'a> {
                 value,
                 span,
             } => self.emit_assign(target, value, *span)?,
+            Expr::StructLit { path, fields, span } => self.emit_struct_lit(path, fields, *span)?,
             Expr::Error { span } => {
                 return Err(EmitError::new(EmitErrorKind::ParseErrorInExpr, *span));
             }
         }
         Ok(())
+    }
+
+    /// Lowers a struct-literal expression `Path { f0: v0, ... }` (S6.3c).
+    ///
+    /// Resolves the struct's declared field order from `struct_registry`,
+    /// emits each field's initialiser **in declaration order** (reordering
+    /// the literal's fields), then `MakeAggregate(tag, field_count)`. A
+    /// literal naming an unknown struct, missing a declared field, or
+    /// carrying an unknown field is rejected with a typed error.
+    fn emit_struct_lit(
+        &mut self,
+        path: &[Ident],
+        fields: &[capy_ast::StructLitField],
+        span: Span,
+    ) -> Result<(), EmitError> {
+        let name = path.last().map(|s| s.name.as_str()).unwrap_or("");
+        // Clone the declared field order so the registry borrow is released
+        // before lowering field initialisers (which borrow `&mut self`).
+        let layout = match self.struct_registry.get(name) {
+            Some(l) => l.clone(),
+            None => {
+                return Err(EmitError::new(
+                    EmitErrorKind::UnsupportedExpr {
+                        what: "struct literal of unknown type",
+                    },
+                    span,
+                ));
+            }
+        };
+        // Reject any literal field that is not a declared field.
+        for f in fields {
+            if !layout.fields.iter().any(|d| d == &f.name.name) {
+                return Err(EmitError::new(
+                    EmitErrorKind::UnsupportedFeature {
+                        what: "unknown field in struct literal",
+                    },
+                    f.span,
+                ));
+            }
+        }
+        // Emit initialisers in the struct's declared field order.
+        for declared in &layout.fields {
+            match fields.iter().find(|f| &f.name.name == declared) {
+                Some(f) => self.emit_expr(&f.value)?,
+                None => {
+                    return Err(EmitError::new(
+                        EmitErrorKind::UnsupportedFeature {
+                            what: "struct literal is missing a field",
+                        },
+                        span,
+                    ));
+                }
+            }
+        }
+        self.emit_op(Opcode::MakeAggregate);
+        self.emit_u32(layout.tag);
+        self.emit_u32(layout.fields.len() as u32);
+        Ok(())
+    }
+
+    /// Resolves a struct field name to its declared index, or `None` if
+    /// the struct or field is unknown.
+    fn struct_field_index(&self, struct_name: &str, field_name: &str) -> Option<u32> {
+        let layout = self.struct_registry.get(struct_name)?;
+        layout
+            .fields
+            .iter()
+            .position(|f| f == field_name)
+            .map(|i| i as u32)
     }
 
     fn emit_ident_load(&mut self, id: &Ident) -> Result<(), EmitError> {
@@ -745,12 +906,7 @@ impl<'a> FunctionEmitter<'a> {
         Ok(())
     }
 
-    fn emit_binary(
-        &mut self,
-        op: BinOp,
-        lhs: &Expr,
-        rhs: &Expr,
-    ) -> Result<(), EmitError> {
+    fn emit_binary(&mut self, op: BinOp, lhs: &Expr, rhs: &Expr) -> Result<(), EmitError> {
         let opcode = match op {
             BinOp::Add => Opcode::Add,
             BinOp::Sub => Opcode::Sub,
@@ -1008,6 +1164,7 @@ impl<'a> FunctionEmitter<'a> {
         body: &Expr,
         span: Span,
     ) -> Result<(), EmitError> {
+        let saved_locals = self.locals.clone();
         let var_idx = self.allocate_local(&var.name, var.span)?;
         self.emit_expr(start)?;
         self.emit_op(Opcode::StoreLocal);
@@ -1049,6 +1206,7 @@ impl<'a> FunctionEmitter<'a> {
         self.emit_op(Opcode::Pop);
         self.mark_label(fallthrough);
         self.emit_op(Opcode::LoadNone);
+        self.locals = saved_locals;
         Ok(())
     }
 
@@ -1097,6 +1255,36 @@ impl<'a> FunctionEmitter<'a> {
     /// `locals[0..argc]` (for `Call`) or hands them to the host adapter
     /// as a borrowed slice (for `HostCall`).
     fn emit_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Result<(), EmitError> {
+        // Variant construction takes precedence (S6.3b): a callee whose
+        // last segment names a known enum variant lowers to
+        // `MakeAggregate(tag, argc)`, e.g. `Some(5)` (an `Ident` callee)
+        // or `Color::Pair(a, b)` (a `Path` callee). The args become the
+        // aggregate's fields in source order.
+        let callee_variant = match callee {
+            Expr::Ident(id) => Some(id.name.as_str()),
+            Expr::Path { segments, .. } => segments.last().map(|s| s.name.as_str()),
+            _ => None,
+        };
+        let variant_tag = match callee_variant {
+            Some(n) => self.variant_registry.get(n).copied(),
+            None => None,
+        };
+        if let Some(tag) = variant_tag {
+            if args.len() > u32::MAX as usize {
+                return Err(EmitError::new(
+                    EmitErrorKind::TooManyArguments { count: args.len() },
+                    span,
+                ));
+            }
+            for a in args {
+                self.emit_expr(a)?;
+            }
+            self.emit_op(Opcode::MakeAggregate);
+            self.emit_u32(tag);
+            self.emit_u32(args.len() as u32);
+            return Ok(());
+        }
+
         let name = match callee {
             Expr::Ident(id) => &id.name,
             Expr::Path { span, .. } => {
@@ -1156,6 +1344,83 @@ impl<'a> FunctionEmitter<'a> {
         let idx = self.locals_count;
         self.locals_count += 1;
         idx
+    }
+
+    /// Extracts `scrut.fields[index]` into a fresh unnamed local and
+    /// returns its slot (S6.3b). Used by tuple-variant `match` arms so
+    /// each field's sub-pattern can be tested / bound by recursing on a
+    /// plain local. Stack-neutral: `load_local; get_field; store_local`.
+    fn extract_field(&mut self, scrut_slot: u32, index: u32) -> u32 {
+        let field_slot = self.alloc_unnamed_local();
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(scrut_slot);
+        self.emit_op(Opcode::GetField);
+        self.emit_u32(index);
+        self.emit_op(Opcode::StoreLocal);
+        self.emit_u32(field_slot);
+        field_slot
+    }
+
+    /// Emits a variant discriminant test for a `match` arm (S6.3b):
+    /// `load_local scrut; get_tag; load_const Int(tag); eq;
+    /// jump_if_false next_arm`. The `variant` name (a path's last
+    /// segment) must resolve in `variant_registry`, else the arm is
+    /// rejected with a typed error. Stack-neutral on the success path.
+    fn emit_variant_tag_test(
+        &mut self,
+        variant: &str,
+        scrut_slot: u32,
+        next_arm: u32,
+        span: Span,
+    ) -> Result<(), EmitError> {
+        let tag = self.variant_registry.get(variant).copied().ok_or_else(|| {
+            EmitError::new(
+                EmitErrorKind::UnsupportedFeature {
+                    what: "unknown enum variant in pattern",
+                },
+                span,
+            )
+        })?;
+        self.emit_tag_eq_test(tag, scrut_slot, next_arm, span);
+        Ok(())
+    }
+
+    /// Emits `load_local scrut; get_tag; load_const Int(tag); eq;
+    /// jump_if_false next_arm` — the discriminant test shared by enum
+    /// variant (S6.3b) and struct (S6.3c) `match` arms. Stack-neutral on
+    /// the success path; the failure path consumes the pushed bool.
+    fn emit_tag_eq_test(&mut self, tag: u32, scrut_slot: u32, next_arm: u32, span: Span) {
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(scrut_slot);
+        self.emit_op(Opcode::GetTag);
+        let idx = self.consts.intern_int(i64::from(tag));
+        self.emit_op(Opcode::LoadConst);
+        self.emit_u32(idx);
+        self.emit_op(Opcode::Eq);
+        self.emit_jump(Opcode::JumpIfFalse, next_arm, span);
+    }
+
+    /// Whether a pattern emits a discriminant / value test (vs. always
+    /// matching). `Wildcard` and a bare `Ident` binding always match;
+    /// every other pattern emits a test. Used to skip needless field
+    /// extraction for binding-only tuple-variant sub-patterns.
+    fn pattern_needs_test(p: &Pattern) -> bool {
+        !matches!(p, Pattern::Wildcard { .. } | Pattern::Ident(_))
+    }
+
+    /// Whether a pattern introduces any identifier binding (so the
+    /// binding pass knows whether to extract a field and recurse).
+    fn pattern_binds(p: &Pattern) -> bool {
+        match p {
+            Pattern::Ident(_) => true,
+            Pattern::TupleStruct { elems, .. } => elems.iter().any(Self::pattern_binds),
+            Pattern::Struct { fields, .. } => fields.iter().any(|f| match &f.pattern {
+                // Shorthand `Point { x }` binds the field name `x`.
+                None => true,
+                Some(sub) => Self::pattern_binds(sub),
+            }),
+            _ => false,
+        }
     }
 
     /// Lowering for `match scrut { arm0, arm1, ... }` (S2.2b → emitter).
@@ -1331,28 +1596,68 @@ impl<'a> FunctionEmitter<'a> {
                 self.mark_label(body_label);
                 Ok(())
             }
-            // Pattern kinds whose lowering is not part of this slice
-            // yet: report a typed error so the rest of the program
-            // still emits and the diagnostic points at the offending
-            // arm.
-            Pattern::TupleStruct { span, .. } => Err(EmitError::new(
-                EmitErrorKind::UnsupportedFeature {
-                    what: "tuple-struct pattern in match",
-                },
-                *span,
-            )),
-            Pattern::Struct { span, .. } => Err(EmitError::new(
-                EmitErrorKind::UnsupportedFeature {
-                    what: "struct pattern in match",
-                },
-                *span,
-            )),
-            Pattern::Path { span, .. } => Err(EmitError::new(
-                EmitErrorKind::UnsupportedFeature {
-                    what: "path pattern in match",
-                },
-                *span,
-            )),
+            // Tuple-variant pattern (`Some(x)`, `Pair(1, b)`): test the
+            // discriminant, then recurse into each field's sub-pattern
+            // (S6.3b). Sub-patterns that only bind (`Ident`) or ignore
+            // (`Wildcard`) emit no test here; their bindings run in
+            // `emit_pattern_bindings`.
+            Pattern::TupleStruct { path, elems, span } => {
+                let name = path.last().map(|s| s.name.as_str()).unwrap_or("");
+                self.emit_variant_tag_test(name, scrut_slot, next_arm, *span)?;
+                for (i, elem) in elems.iter().enumerate() {
+                    if Self::pattern_needs_test(elem) {
+                        let field_slot = self.extract_field(scrut_slot, i as u32);
+                        self.emit_pattern_test(elem, field_slot, next_arm)?;
+                    }
+                }
+                Ok(())
+            }
+            // Struct pattern (`Point { x, y: 0 }`): test the discriminant,
+            // then resolve each named field to its declared index and
+            // recurse into its sub-pattern (S6.3c). Shorthand fields
+            // (`{ x }`) bind in `emit_pattern_bindings`; `..` simply leaves
+            // unlisted fields untested.
+            Pattern::Struct {
+                path, fields, span, ..
+            } => {
+                let name = path.last().map(|s| s.name.as_str()).unwrap_or("");
+                let tag = self
+                    .struct_registry
+                    .get(name)
+                    .map(|l| l.tag)
+                    .ok_or_else(|| {
+                        EmitError::new(
+                            EmitErrorKind::UnsupportedFeature {
+                                what: "unknown struct in pattern",
+                            },
+                            *span,
+                        )
+                    })?;
+                self.emit_tag_eq_test(tag, scrut_slot, next_arm, *span);
+                for f in fields {
+                    let index = self.struct_field_index(name, &f.name.name).ok_or_else(|| {
+                        EmitError::new(
+                            EmitErrorKind::UnsupportedFeature {
+                                what: "unknown field in struct pattern",
+                            },
+                            f.span,
+                        )
+                    })?;
+                    if let Some(sub) = &f.pattern {
+                        if Self::pattern_needs_test(sub) {
+                            let field_slot = self.extract_field(scrut_slot, index);
+                            self.emit_pattern_test(sub, field_slot, next_arm)?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            // Unit-variant pattern (`Color::Red`): test the scrutinee's
+            // discriminant against the variant's tag (S6.3b).
+            Pattern::Path { segments, span } => {
+                let name = segments.last().map(|s| s.name.as_str()).unwrap_or("");
+                self.emit_variant_tag_test(name, scrut_slot, next_arm, *span)
+            }
             Pattern::Rest { span } => Err(EmitError::new(
                 EmitErrorKind::UnsupportedFeature {
                     what: "rest pattern in match",
@@ -1381,20 +1686,65 @@ impl<'a> FunctionEmitter<'a> {
     }
 
     /// Binds pattern identifiers to fresh locals so the arm body can
-    /// reference them by name. Only `Pattern::Ident` introduces a
-    /// binding in the first cut; other supported patterns
-    /// (`Wildcard`, `Literal`) introduce no bindings.
+    /// reference them by name. A bare `Pattern::Ident` binds the whole
+    /// scrutinee; a `Pattern::TupleStruct` recurses into each field that
+    /// binds, extracting it first (S6.3b). `Wildcard` / `Literal` /
+    /// `Path` introduce no bindings. Runs only after the arm's tests
+    /// have all passed (control reached the body), so the bound values
+    /// are exactly those of the matched variant.
     fn emit_pattern_bindings(
         &mut self,
         pattern: &Pattern,
         scrut_slot: u32,
     ) -> Result<(), EmitError> {
-        if let Pattern::Ident(id) = pattern {
-            let binding_slot = self.allocate_local(&id.name, id.span)?;
-            self.emit_op(Opcode::LoadLocal);
-            self.emit_u32(scrut_slot);
-            self.emit_op(Opcode::StoreLocal);
-            self.emit_u32(binding_slot);
+        match pattern {
+            Pattern::Ident(id) => {
+                let binding_slot = self.allocate_local(&id.name, id.span)?;
+                self.emit_op(Opcode::LoadLocal);
+                self.emit_u32(scrut_slot);
+                self.emit_op(Opcode::StoreLocal);
+                self.emit_u32(binding_slot);
+            }
+            Pattern::TupleStruct { elems, .. } => {
+                for (i, elem) in elems.iter().enumerate() {
+                    if Self::pattern_binds(elem) {
+                        let field_slot = self.extract_field(scrut_slot, i as u32);
+                        self.emit_pattern_bindings(elem, field_slot)?;
+                    }
+                }
+            }
+            // Struct pattern bindings (S6.3c): each field resolves to its
+            // declared index; a shorthand field `{ x }` binds `x` directly,
+            // and a `name: sub` field recurses when `sub` binds.
+            Pattern::Struct { path, fields, .. } => {
+                let name = path.last().map(|s| s.name.as_str()).unwrap_or("");
+                for f in fields {
+                    let index = match self.struct_field_index(name, &f.name.name) {
+                        Some(i) => i,
+                        // Unknown fields were already reported by the test
+                        // pass; skip them here so binding stays best-effort.
+                        None => continue,
+                    };
+                    match &f.pattern {
+                        None => {
+                            let binding_slot = self.allocate_local(&f.name.name, f.name.span)?;
+                            self.emit_op(Opcode::LoadLocal);
+                            self.emit_u32(scrut_slot);
+                            self.emit_op(Opcode::GetField);
+                            self.emit_u32(index);
+                            self.emit_op(Opcode::StoreLocal);
+                            self.emit_u32(binding_slot);
+                        }
+                        Some(sub) => {
+                            if Self::pattern_binds(sub) {
+                                let field_slot = self.extract_field(scrut_slot, index);
+                                self.emit_pattern_bindings(sub, field_slot)?;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
         Ok(())
     }

@@ -7,11 +7,11 @@ integrated with CapyOS.
 
 ## CapyOS reference version
 
-- CapyOS core pinned for this contract: `0.8.0-alpha.261+20260529`
+- CapyOS core pinned for this contract: `0.8.0-alpha.262+20260602`
 - Authoritative cross-repo matrix: [`CapyOS/docs/reference/integration/compatibility-matrix.md`](../../CapyOS/docs/reference/integration/compatibility-matrix.md)
 - Canonical manifest format consumed by the in-tree adapter: [`CapyOS/docs/reference/integration/capypkg-publisher-manifest-format.md`](../../CapyOS/docs/reference/integration/capypkg-publisher-manifest-format.md)
 - Manual deploy runbook: [`CapyOS/docs/operations/manual-module-deploy-runbook.md`](../../CapyOS/docs/operations/manual-module-deploy-runbook.md)
-- Current cross-repo audit: [`CapyOS/docs/reference/integration/compatibility-audit-2026-05-23.md`](../../CapyOS/docs/reference/integration/compatibility-audit-2026-05-23.md)
+- Current cross-repo audit: [`CapyOS/docs/reference/integration/compatibility-audit-2026-06-02.md`](../../CapyOS/docs/reference/integration/compatibility-audit-2026-06-02.md)
 
 Authoritative CapyOS references:
 
@@ -42,7 +42,8 @@ Current ABI surface:
   (`Int`, `Float`, `Str`, `Bool`, `NoneLit`, `Ident`, `Path`, `Paren`,
   `Call`, `Index`, `Field`, `Unary`, `Binary`, `Block`, `If`,
   `While`, `Loop`, `For`, `Return`, `Break`, `Continue`, `Match`,
-  `Array`, `Assign`, `Error`),
+  `Array`, `Assign`, `StructLit`, `Error`) with the `StructLitField`
+  companion (S6.3c),
   the `MatchArm` and `Pattern` (`Wildcard`, `Rest`, `Literal`,
   `Ident`, `Path`, `TupleStruct`, `Struct`, `Or`, `Range`, `Error`)
   + `StructPatternField` companions for S2.2b, `Ident`,
@@ -122,8 +123,10 @@ Current ABI surface:
 - VM core (S6.1) — `capy-vm` crate publishing `Vm::from_module`,
   `Vm::from_module_with_host`, `Vm::with_host_adapter`,
   `Vm::run` / `Vm::run_with_budget`, `Value` (`None` / `Bool` /
-  `Int(i64)` / `Float(f64)` / `Str(String)` / `Array`, the last a
-  reference-semantics `Rc<RefCell<Vec<Value>>>` added by S6.2),
+  `Int(i64)` / `Float(f64)` / `Str(String)` / `Array` /
+  `Aggregate`, the last two reference-semantics
+  `Rc<RefCell<Vec<Value>>>` handles added by S6.2 (`Array`) and S6.3a
+  (`Aggregate { tag, fields }`, a struct instance or enum variant)),
   `HostAdapter`,
   `HostFn`, `HostResult` and `VmError` (implements
   `std::fmt::Display` + `std::error::Error`, output prefixed with
@@ -131,11 +134,12 @@ Current ABI surface:
   `pc() -> Option<u32>` so downstream tooling can resolve errors
   through `capy-diagnostics::bridge::from_vm_with_debug`) with
   the frozen catalogue
-  `V0001`-`V0017` (S5b.3 added `V0011` `CALL_STACK_OVERFLOW`,
+  `V0001`-`V0018` (S5b.3 added `V0011` `CALL_STACK_OVERFLOW`,
   `V0012` `UNKNOWN_FUNCTION_INDEX`, `V0013` `CALL_ARITY_MISMATCH`;
   S7 added `V0014` `UNKNOWN_HOST_IMPORT`, `V0015`
   `UNRESOLVED_HOST_IMPORT`, `V0016` `HOST_CALL_FAILED`; S6.2 added
-  `V0017` `INDEX_OUT_OF_BOUNDS`)
+  `V0017` `INDEX_OUT_OF_BOUNDS`; S6.3a added `V0018`
+  `FIELD_OUT_OF_BOUNDS`)
   (`STACK_UNDERFLOW`, `LOCAL_OUT_OF_BOUNDS`, `CONST_OUT_OF_BOUNDS`,
   `JUMP_OUT_OF_BOUNDS`, `TYPE_MISMATCH`, `DIVISION_BY_ZERO`,
   `BUDGET_EXHAUSTED`, `UNKNOWN_FUNCTION`, `MALFORMED_MODULE`,
@@ -173,12 +177,13 @@ Current ABI surface:
   top-level `Item::Fn` (with parameters registered as the first
   locals) + `Item::Import` forms into a fully self-consistent
   `Module` that round-trips through `Module::parse`.
-- v0 opcode set + instruction codec (S5a / S5b.3 / S7 / S5d / S6.2) — `Opcode`
-  (36 frozen byte values; `0x82 host_call` added by S7; the integer
+- v0 opcode set + instruction codec (S5a / S5b.3 / S7 / S5d / S6.2 / S6.3a) — `Opcode`
+  (39 frozen byte values; `0x82 host_call` added by S7; the integer
   bitwise/shift opcodes `band`/`bor`/`bxor`/`shl`/`shr` (0x36-0x3A) and
-  `bnot` (0x51) added by S5d; the aggregate opcodes
+  `bnot` (0x51) added by S5d; the array opcodes
   `make_array`/`array_get`/`array_set`/`array_len` (0x60-0x63) added by
-  S6.2),
+  S6.2; the tagged-aggregate opcodes `make_aggregate`/`get_field`/`get_tag`
+  (0x64-0x66) added by S6.3a),
   `Imm { None, U32, I32, U32U32 }`,
   `Instruction` enum, `encode` / `decode` / `disassemble_text`.
   Defines the instruction stream inside `Function.code`. Stack
@@ -188,8 +193,9 @@ Current ABI surface:
   `Mod`, `Neg`), bitwise/shift on integers (`BitAnd`, `BitOr`,
   `BitXor`, `Shl`, `Shr`, `BitNot`), comparison
   (`Eq`, `Ne`, `Lt`, `Le`, `Gt`, `Ge`),
-  logical (`Not`), aggregates (`MakeArray U32`, `ArrayGet`, `ArraySet`,
-  `ArrayLen`), control flow (`Jump I32`, `JumpIfFalse I32`
+  logical (`Not`), arrays (`MakeArray U32`, `ArrayGet`, `ArraySet`,
+  `ArrayLen`), tagged aggregates (`MakeAggregate U32U32`, `GetField U32`,
+  `GetTag`), control flow (`Jump I32`, `JumpIfFalse I32`
   — both PC-relative to the byte after the immediate),
   function call (`Call U32U32` — `(fn_idx, argc)`), `Return` and
   host bridge (`HostCall U32U32` — `(import_idx, argc)`).
@@ -210,10 +216,25 @@ Current ABI surface:
   `StoreLocal`/`LoadLocal`/`LoadConst`/`Eq`/`Ge`/`Le`/`Lt`/
   `JumpIfFalse`/`Jump`/`LoadNone`). Identifier bindings inside
   or-pattern alts are restricted (binding-merging is type-aware
-  and lands later); tuple-struct, struct and path patterns still
-  surface a typed `EmitErrorKind::UnsupportedFeature` at the
-  offending arm. `trait`/`impl` and extended type forms land in
-  S2.3c.
+  and lands later). S6.3b adds enum support: an `enum` declaration
+  registers each variant's wire-opaque tag (emitter-internal, never
+  serialised), unit-variant construction (`Color::Red`, a `Path`)
+  lowers to `MakeAggregate(tag, 0)`, tuple-variant construction
+  (`Some(5)` / `Color::Pair(a, b)`, a `Call`) lowers to the args
+  plus `MakeAggregate(tag, argc)`, and `match` `Path` /
+  `TupleStruct` arms lower to a `GetTag` discriminant test followed
+  by recursive `GetField` extraction of each payload sub-pattern.
+  S6.3c adds `struct` support: a `struct` declaration registers a
+  field layout (tag + declared field order), a struct-literal
+  expression `Point { y: 2, x: 1 }` lowers to its initialisers
+  reordered into declaration order plus `MakeAggregate(tag,
+  field_count)`, and a `match` `Struct` pattern lowers to a `GetTag`
+  test plus per-field `GetField` extraction resolved by field name.
+  Struct literals are parsed only outside a "no-struct-literal" head
+  context (`if` / `while` / `match` heads and `for` bounds), where
+  `Path { ... }` is a path expression followed by a block. With
+  S6.3a-c every `enum` / `struct` round-trips construct → `match`;
+  `trait`/`impl` and extended type forms land in S2.3c.
   The
   `V<NNNN>` VM code prefix is now first occupied by S6.1; the
   `H<NNNN>` host ABI prefix remains
@@ -253,7 +274,7 @@ CapyLang does **not** own:
   `permissions`.
 - JIT is out of scope for the first integration wave. The VM
   interprets bytecode only.
-- The lexer (S1) is stable at v0.1.7; additive changes allowed
+- The lexer (S1) is stable at v0.1.8; additive changes allowed
   within minor versions; major changes require version bump and
   migration note.
 

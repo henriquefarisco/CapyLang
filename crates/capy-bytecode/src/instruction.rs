@@ -57,6 +57,18 @@ pub enum Instruction {
     ArraySet,
     /// `arr -> len(arr)`.
     ArrayLen,
+    /// Pop `field_count` values and push a tagged aggregate (a struct
+    /// instance or an enum variant); field `0` is the first
+    /// popped-in-source-order value. `tag` is an emitter-assigned,
+    /// wire-opaque discriminant.
+    MakeAggregate {
+        tag: u32,
+        field_count: u32,
+    },
+    /// `agg -> agg.fields[index]`.
+    GetField(u32),
+    /// `agg -> tag` (pushes the discriminant as an `Int`).
+    GetTag,
     Jump(i32),
     JumpIfFalse(i32),
     /// Call into another function in the same module.
@@ -121,6 +133,9 @@ impl Instruction {
             Self::ArrayGet => Opcode::ArrayGet,
             Self::ArraySet => Opcode::ArraySet,
             Self::ArrayLen => Opcode::ArrayLen,
+            Self::MakeAggregate { .. } => Opcode::MakeAggregate,
+            Self::GetField(_) => Opcode::GetField,
+            Self::GetTag => Opcode::GetTag,
             Self::Jump(_) => Opcode::Jump,
             Self::JumpIfFalse(_) => Opcode::JumpIfFalse,
             Self::Call { .. } => Opcode::Call,
@@ -139,7 +154,11 @@ impl Instruction {
     pub fn encode_into(self, out: &mut Vec<u8>) {
         out.push(self.opcode().as_byte());
         match self {
-            Self::LoadConst(v) | Self::LoadLocal(v) | Self::StoreLocal(v) | Self::MakeArray(v) => {
+            Self::LoadConst(v)
+            | Self::LoadLocal(v)
+            | Self::StoreLocal(v)
+            | Self::MakeArray(v)
+            | Self::GetField(v) => {
                 out.extend_from_slice(&v.to_le_bytes());
             }
             Self::Jump(v) | Self::JumpIfFalse(v) => {
@@ -152,6 +171,10 @@ impl Instruction {
             Self::HostCall { import_idx, argc } => {
                 out.extend_from_slice(&import_idx.to_le_bytes());
                 out.extend_from_slice(&argc.to_le_bytes());
+            }
+            Self::MakeAggregate { tag, field_count } => {
+                out.extend_from_slice(&tag.to_le_bytes());
+                out.extend_from_slice(&field_count.to_le_bytes());
             }
             _ => {}
         }
@@ -220,6 +243,13 @@ pub fn decode(code: &[u8]) -> Result<Vec<Instruction>, BytecodeError> {
             Opcode::ArrayGet => Instruction::ArrayGet,
             Opcode::ArraySet => Instruction::ArraySet,
             Opcode::ArrayLen => Instruction::ArrayLen,
+            Opcode::MakeAggregate => {
+                let tag = read_u32(&mut cursor, op_pos)?;
+                let field_count = read_u32(&mut cursor, op_pos)?;
+                Instruction::MakeAggregate { tag, field_count }
+            }
+            Opcode::GetField => Instruction::GetField(read_u32(&mut cursor, op_pos)?),
+            Opcode::GetTag => Instruction::GetTag,
             Opcode::Jump => Instruction::Jump(read_i32(&mut cursor, op_pos)?),
             Opcode::JumpIfFalse => Instruction::JumpIfFalse(read_i32(&mut cursor, op_pos)?),
             Opcode::Call => {
@@ -280,7 +310,8 @@ pub fn disassemble_text(instructions: &[Instruction]) -> String {
             Instruction::LoadConst(v)
             | Instruction::LoadLocal(v)
             | Instruction::StoreLocal(v)
-            | Instruction::MakeArray(v) => {
+            | Instruction::MakeArray(v)
+            | Instruction::GetField(v) => {
                 let _ = write!(out, "  {v}");
             }
             Instruction::Jump(v) | Instruction::JumpIfFalse(v) => {
@@ -291,6 +322,9 @@ pub fn disassemble_text(instructions: &[Instruction]) -> String {
             }
             Instruction::HostCall { import_idx, argc } => {
                 let _ = write!(out, "  {import_idx}, {argc}");
+            }
+            Instruction::MakeAggregate { tag, field_count } => {
+                let _ = write!(out, "  {tag}, {field_count}");
             }
             _ => {}
         }
@@ -338,6 +372,12 @@ mod tests {
             Instruction::ArrayGet,
             Instruction::ArraySet,
             Instruction::ArrayLen,
+            Instruction::MakeAggregate {
+                tag: 4,
+                field_count: 2,
+            },
+            Instruction::GetField(1),
+            Instruction::GetTag,
             Instruction::Jump(-4),
             Instruction::JumpIfFalse(8),
             Instruction::Call { fn_idx: 7, argc: 2 },
@@ -474,5 +514,51 @@ mod tests {
         let stream = vec![Instruction::Jump(-5)];
         let text = disassemble_text(&stream);
         assert_eq!(text, "0000  jump  -5\n");
+    }
+
+    #[test]
+    fn make_aggregate_round_trips_with_two_u32_immediates() {
+        let stream = vec![
+            Instruction::MakeAggregate {
+                tag: 2,
+                field_count: 3,
+            },
+            Instruction::Return,
+        ];
+        let bytes = encode(&stream);
+        // 0x64, tag=2 LE, field_count=3 LE, 0x81
+        assert_eq!(bytes, vec![0x64, 2, 0, 0, 0, 3, 0, 0, 0, 0x81]);
+        let parsed = decode(&bytes).unwrap();
+        assert_eq!(parsed, stream);
+    }
+
+    #[test]
+    fn make_aggregate_rejects_truncated_field_count_immediate() {
+        // MakeAggregate opcode + tag (4 bytes) + only 2 of field_count's 4.
+        let err = decode(&[0x64, 1, 0, 0, 0, 0, 0]).unwrap_err();
+        match err {
+            BytecodeError::MalformedInstruction { reason, .. } => {
+                assert_eq!(reason, "truncated u32 immediate");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn disassemble_text_renders_aggregate_ops() {
+        let stream = vec![
+            Instruction::MakeAggregate {
+                tag: 5,
+                field_count: 2,
+            },
+            Instruction::GetField(1),
+            Instruction::GetTag,
+        ];
+        let text = disassemble_text(&stream);
+        // make_aggregate is 9 bytes (opcode + two u32), get_field 5, get_tag 1.
+        let expected = "0000  make_aggregate  5, 2\n\
+                        0009  get_field  1\n\
+                        000e  get_tag\n";
+        assert_eq!(text, expected);
     }
 }

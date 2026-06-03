@@ -14,7 +14,8 @@ use std::fmt::Write as _;
 
 use crate::expr::{
     ConstItem, EnumItem, Expr, FnItem, Ident, ImportItem, Item, MatchArm, Pattern, Source, Stmt,
-    StructField, StructItem, StructPatternField, Type, TypeAlias, Variant, VariantBody,
+    StructField, StructItem, StructLitField, StructPatternField, Type, TypeAlias, Variant,
+    VariantBody,
 };
 
 const INDENT: &str = "  ";
@@ -453,10 +454,30 @@ fn write_expr(out: &mut String, expr: &Expr, depth: usize) {
             write_expr(out, target, depth + 1);
             write_expr(out, value, depth + 1);
         }
+        Expr::StructLit { path, fields, .. } => {
+            let joined: Vec<&str> = path.iter().map(|s| s.name.as_str()).collect();
+            let joined = joined.join("::");
+            write!(out, " StructLit {joined:?}").expect("infallible");
+            out.push('\n');
+            for f in fields {
+                write_struct_lit_field(out, f, depth + 1);
+            }
+        }
         Expr::Error { .. } => {
             out.push_str(" Error\n");
         }
     }
+}
+
+fn write_struct_lit_field(out: &mut String, f: &StructLitField, depth: usize) {
+    write_indent(out, depth);
+    writeln!(
+        out,
+        "[{}..{}] LitField {:?}",
+        f.span.start, f.span.end, f.name.name
+    )
+    .expect("infallible");
+    write_expr(out, &f.value, depth + 1);
 }
 
 fn write_match_arm(out: &mut String, arm: &MatchArm, depth: usize) {

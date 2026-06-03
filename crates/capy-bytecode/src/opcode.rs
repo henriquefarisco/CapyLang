@@ -127,6 +127,18 @@ pub enum Opcode {
     ArraySet = 0x62,
     /// `arr -> len(arr)` (pushes an `Int`).
     ArrayLen = 0x63,
+    /// `MakeAggregate (u32 tag, u32 field_count)` — pop `field_count`
+    /// values and push a tagged aggregate (a struct instance or an enum
+    /// variant); the first value popped (in source order) becomes field
+    /// `0`. `tag` is an emitter-assigned, wire-opaque discriminant the VM
+    /// only stores and compares.
+    MakeAggregate = 0x64,
+    /// `GetField u32` — `agg -> agg.fields[index]` (bounds-checked;
+    /// traps on an out-of-range field index).
+    GetField = 0x65,
+    /// `GetTag` — `agg -> tag` (pushes the discriminant as an `Int`) so a
+    /// lowered `match` can branch on an aggregate's variant.
+    GetTag = 0x66,
 
     // === Control flow =======================================================
     /// `Jump i32` — unconditional relative jump.
@@ -201,6 +213,9 @@ impl Opcode {
             0x61 => Self::ArrayGet,
             0x62 => Self::ArraySet,
             0x63 => Self::ArrayLen,
+            0x64 => Self::MakeAggregate,
+            0x65 => Self::GetField,
+            0x66 => Self::GetTag,
             0x70 => Self::Jump,
             0x71 => Self::JumpIfFalse,
             0x80 => Self::Call,
@@ -220,9 +235,13 @@ impl Opcode {
     #[must_use]
     pub const fn immediate(self) -> Imm {
         match self {
-            Self::LoadConst | Self::LoadLocal | Self::StoreLocal | Self::MakeArray => Imm::U32,
+            Self::LoadConst
+            | Self::LoadLocal
+            | Self::StoreLocal
+            | Self::MakeArray
+            | Self::GetField => Imm::U32,
             Self::Jump | Self::JumpIfFalse => Imm::I32,
-            Self::Call | Self::HostCall => Imm::U32U32,
+            Self::Call | Self::HostCall | Self::MakeAggregate => Imm::U32U32,
             _ => Imm::None,
         }
     }
@@ -263,6 +282,9 @@ impl Opcode {
             Self::ArrayGet => "array_get",
             Self::ArraySet => "array_set",
             Self::ArrayLen => "array_len",
+            Self::MakeAggregate => "make_aggregate",
+            Self::GetField => "get_field",
+            Self::GetTag => "get_tag",
             Self::Jump => "jump",
             Self::JumpIfFalse => "jump_if_false",
             Self::Call => "call",
@@ -310,6 +332,9 @@ mod tests {
             Opcode::ArrayGet,
             Opcode::ArraySet,
             Opcode::ArrayLen,
+            Opcode::MakeAggregate,
+            Opcode::GetField,
+            Opcode::GetTag,
             Opcode::Jump,
             Opcode::JumpIfFalse,
             Opcode::Call,
@@ -376,6 +401,9 @@ mod tests {
             Opcode::ArrayGet,
             Opcode::ArraySet,
             Opcode::ArrayLen,
+            Opcode::MakeAggregate,
+            Opcode::GetField,
+            Opcode::GetTag,
             Opcode::Jump,
             Opcode::JumpIfFalse,
             Opcode::Call,

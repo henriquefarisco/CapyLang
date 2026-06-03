@@ -128,6 +128,7 @@ primary_expr  = int_literal
               | string_literal
               | "true" | "false" | "None"
               | path_expr
+              | struct_literal
               | "(" , expression , ")"
               | array_literal
               | block_expr
@@ -163,6 +164,14 @@ continue_expr = "continue" ;
 (* comma is allowed. Indexing reuses the existing postfix form          *)
 (* `expr "[" expr "]"`.                                                 *)
 array_literal = "[" , [ expression , { "," , expression } , [ "," ] ] , "]" ;
+(* S6.3c: struct-literal expression. A path followed by a braced field   *)
+(* list. Recognised only OUTSIDE a "no-struct-literal" context — the     *)
+(* head of `if` / `while` / `match` and the bounds of `for`, where       *)
+(* `path "{"` opens a block instead. Field shorthand `Point { x }` is    *)
+(* `x: x`. The emitter reorders fields into the struct's declared order. *)
+struct_literal = path_expr , "{" ,
+                 [ struct_lit_field , { "," , struct_lit_field } , [ "," ] ] , "}" ;
+struct_lit_field = ident , [ ":" , expression ] ;
 
 (* --- S2.2b: match expressions and patterns (active) -------------------- *)
 (* `match` is block-like (statement form may omit `;`). The arm comma is  *)

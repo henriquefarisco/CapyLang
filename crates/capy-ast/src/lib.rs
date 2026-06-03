@@ -32,6 +32,6 @@ pub use capy_lexer::Span;
 pub use dump::{dump_expr, dump_source};
 pub use expr::{
     BinOp, ConstItem, EnumItem, Expr, FnItem, Ident, ImportItem, Item, MatchArm, Param, Pattern,
-    Source, Stmt, StructField, StructItem, StructPatternField, Type, TypeAlias, UnOp, Variant,
-    VariantBody,
+    Source, Stmt, StructField, StructItem, StructLitField, StructPatternField, Type, TypeAlias,
+    UnOp, Variant, VariantBody,
 };

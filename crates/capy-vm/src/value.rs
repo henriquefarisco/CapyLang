@@ -33,6 +33,19 @@ pub enum Value {
     /// the VM's in-language comparison opcodes (`Eq` / `Ne` / ordering)
     /// trap on arrays with `TYPE_MISMATCH` in v0.
     Array(Rc<RefCell<Vec<Value>>>),
+    /// Tagged aggregate with **reference semantics** (S6.3): a struct
+    /// instance or an enum variant. `tag` is an emitter-assigned,
+    /// wire-opaque discriminant the VM only stores and compares (all
+    /// naming lives in the emitter); `fields` holds the components in
+    /// declaration order (struct fields, or the variant payload). Shares
+    /// the array reference-semantics / opacity rules: aliases share one
+    /// backing store, no host pointer crosses the boundary, the derived
+    /// `PartialEq` is structural (host-side tests only) and the
+    /// in-language comparison opcodes trap with `TYPE_MISMATCH` in v0.
+    Aggregate {
+        tag: u32,
+        fields: Rc<RefCell<Vec<Value>>>,
+    },
 }
 
 impl Value {
@@ -46,6 +59,7 @@ impl Value {
             Self::Float(_) => "float",
             Self::Str(_) => "str",
             Self::Array(_) => "array",
+            Self::Aggregate { .. } => "aggregate",
         }
     }
 }

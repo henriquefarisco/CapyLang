@@ -15,8 +15,8 @@
 
 use capy_ast::{
     BinOp, ConstItem, EnumItem, Expr, FnItem, Ident, ImportItem, Item, MatchArm, Param, Pattern,
-    Source, Span, Stmt, StructField, StructItem, StructPatternField, Type, TypeAlias, UnOp,
-    Variant, VariantBody,
+    Source, Span, Stmt, StructField, StructItem, StructLitField, StructPatternField, Type,
+    TypeAlias, UnOp, Variant, VariantBody,
 };
 use capy_lexer::{tokenize, LexResult, Token, TokenKind};
 
@@ -85,6 +85,15 @@ struct Parser<'a> {
     tokens: Vec<Token>,
     pos: usize,
     diagnostics: Vec<ParseDiagnostic>,
+    /// When set, a path immediately followed by `{` is **not** parsed as
+    /// a struct-literal expression (S6.3c): the `{` belongs to a control
+    /// flow body instead. Set only while parsing the head of `if` /
+    /// `while` / `match` and the bounds of `for` (via
+    /// [`Parser::parse_head_expr`]); reset to `false` inside every
+    /// delimiter — parens, call args, array elements, index, block
+    /// bodies, struct-literal field values and `match` arms (via
+    /// [`Parser::parse_delimited_expr`] / [`Parser::parse_block_expr`]).
+    no_struct_literal: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -110,7 +119,33 @@ impl<'a> Parser<'a> {
             tokens,
             pos: 0,
             diagnostics,
+            no_struct_literal: false,
         }
+    }
+
+    /// Parses a full expression with struct-literal syntax **suppressed**
+    /// at the top level. Used for the head of `if` / `while` / `match`
+    /// and the bounds of `for`, where `Path { ... }` is a path followed
+    /// by a block rather than a struct literal. The suppression is reset
+    /// inside any delimiter (see [`Self::parse_delimited_expr`]).
+    fn parse_head_expr(&mut self) -> Expr {
+        let saved = self.no_struct_literal;
+        self.no_struct_literal = true;
+        let e = self.parse_expression(MIN_PREC);
+        self.no_struct_literal = saved;
+        e
+    }
+
+    /// Parses a full expression with struct-literal syntax **allowed**.
+    /// Used inside every delimiter (parens, call args, array elements,
+    /// index, struct-literal field values and `match` arms) so a head
+    /// context does not leak its suppression into nested expressions.
+    fn parse_delimited_expr(&mut self) -> Expr {
+        let saved = self.no_struct_literal;
+        self.no_struct_literal = false;
+        let e = self.parse_expression(MIN_PREC);
+        self.no_struct_literal = saved;
+        e
     }
 
     fn peek(&self) -> Token {
@@ -291,7 +326,7 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::LBracket => {
                     self.advance();
-                    let index = self.parse_expression(MIN_PREC);
+                    let index = self.parse_delimited_expr();
                     let close = self.expect(TokenKind::RBracket, "`]`");
                     let span = Span::new(expr.span().start, close.span.end);
                     expr = Expr::Index {
@@ -323,7 +358,7 @@ impl<'a> Parser<'a> {
             if matches!(tok.kind, TokenKind::RParen | TokenKind::Eof) {
                 break;
             }
-            args.push(self.parse_expression(MIN_PREC));
+            args.push(self.parse_delimited_expr());
             if self.peek().kind == TokenKind::Comma {
                 self.advance();
             } else {
@@ -378,7 +413,7 @@ impl<'a> Parser<'a> {
             TokenKind::Ident => self.parse_ident_or_path(),
             TokenKind::LParen => {
                 self.advance();
-                let inner = self.parse_expression(MIN_PREC);
+                let inner = self.parse_delimited_expr();
                 let close = self.expect(TokenKind::RParen, "`)`");
                 let span = Span::new(tok.span.start, close.span.end);
                 Expr::Paren {
@@ -526,6 +561,11 @@ impl<'a> Parser<'a> {
     /// Parses `{ stmts; tail? }`. The opening `{` is at [`Self::peek`].
     fn parse_block_expr(&mut self) -> Expr {
         let open = self.expect(TokenKind::LBrace, "`{`");
+        // A block body is a fresh expression context: struct literals are
+        // allowed even when the block itself sits in a no-struct-literal
+        // head (e.g. the body of `if cond { Point { x: 1 } }`).
+        let saved_no_struct = self.no_struct_literal;
+        self.no_struct_literal = false;
         let mut stmts: Vec<Stmt> = Vec::new();
         let mut tail: Option<Box<Expr>> = None;
         loop {
@@ -589,6 +629,7 @@ impl<'a> Parser<'a> {
             }
         }
         let close = self.expect(TokenKind::RBrace, "`}`");
+        self.no_struct_literal = saved_no_struct;
         Expr::Block {
             stmts,
             tail,
@@ -601,7 +642,7 @@ impl<'a> Parser<'a> {
         let open = self.expect(TokenKind::LBracket, "`[`");
         let mut elems = Vec::new();
         while !matches!(self.peek().kind, TokenKind::RBracket | TokenKind::Eof) {
-            elems.push(self.parse_expression(MIN_PREC));
+            elems.push(self.parse_delimited_expr());
             if self.peek().kind == TokenKind::Comma {
                 self.advance();
             } else {
@@ -618,7 +659,7 @@ impl<'a> Parser<'a> {
     /// `if <cond> <block> [else (if-expr | block)]`
     fn parse_if_expr(&mut self) -> Expr {
         let if_kw = self.expect(TokenKind::If, "`if`");
-        let cond = self.parse_expression(MIN_PREC);
+        let cond = self.parse_head_expr();
         let then_branch = self.parse_block_expr();
         let mut end = then_branch.span().end;
         let else_branch = if self.peek().kind == TokenKind::Else {
@@ -644,7 +685,7 @@ impl<'a> Parser<'a> {
     /// `while <cond> <block>`
     fn parse_while_expr(&mut self) -> Expr {
         let while_kw = self.expect(TokenKind::While, "`while`");
-        let cond = self.parse_expression(MIN_PREC);
+        let cond = self.parse_head_expr();
         let body = self.parse_block_expr();
         let span = Span::new(while_kw.span.start, body.span().end);
         Expr::While {
@@ -674,14 +715,14 @@ impl<'a> Parser<'a> {
         let for_kw = self.expect(TokenKind::For, "`for`");
         let var = self.expect_ident("loop variable after `for`");
         self.expect(TokenKind::In, "`in`");
-        let start = self.parse_expression(MIN_PREC);
+        let start = self.parse_head_expr();
         let dotdot = self.expect(TokenKind::DotDot, "`..` in `for` range");
         let inclusive =
             self.peek().kind == TokenKind::Eq && self.peek().span.start == dotdot.span.end;
         if inclusive {
             self.advance();
         }
-        let end = self.parse_expression(MIN_PREC);
+        let end = self.parse_head_expr();
         let body = self.parse_block_expr();
         let span = Span::new(for_kw.span.start, body.span().end);
         Expr::For {
@@ -703,7 +744,7 @@ impl<'a> Parser<'a> {
     /// `pattern (if <guard>)? => <body>`.
     fn parse_match_expr(&mut self) -> Expr {
         let kw = self.expect(TokenKind::Match, "`match`");
-        let scrutinee = self.parse_expression(MIN_PREC);
+        let scrutinee = self.parse_head_expr();
         self.expect(TokenKind::LBrace, "`{`");
         let mut arms: Vec<MatchArm> = Vec::new();
         loop {
@@ -750,12 +791,12 @@ impl<'a> Parser<'a> {
         let pattern = self.parse_pattern();
         let guard = if self.peek().kind == TokenKind::If {
             self.advance();
-            Some(self.parse_expression(MIN_PREC))
+            Some(self.parse_delimited_expr())
         } else {
             None
         };
         self.expect(TokenKind::FatArrow, "`=>`");
-        let body = self.parse_expression(MIN_PREC);
+        let body = self.parse_delimited_expr();
         let end = body.span().end;
         MatchArm {
             pattern,
@@ -1389,19 +1430,67 @@ impl<'a> Parser<'a> {
 
     fn parse_ident_or_path(&mut self) -> Expr {
         let first = self.expect_ident("identifier");
-        if self.peek().kind != TokenKind::ColonColon {
-            return Expr::Ident(first);
-        }
         let mut segments = vec![first];
         while self.peek().kind == TokenKind::ColonColon {
             self.advance();
             segments.push(self.expect_ident("path segment"));
+        }
+        // Struct-literal expression `Path { field, ... }` (S6.3c). Only
+        // recognised outside a no-struct-literal head context, so an
+        // `if cond { .. }` head treats the `{` as a block instead.
+        if !self.no_struct_literal && self.peek().kind == TokenKind::LBrace {
+            return self.parse_struct_literal_body(segments);
+        }
+        if segments.len() == 1 {
+            return Expr::Ident(segments.pop().expect("one segment"));
         }
         let start = segments.first().expect("non-empty path").span.start;
         let end = segments.last().expect("non-empty path").span.end;
         Expr::Path {
             segments,
             span: Span::new(start, end),
+        }
+    }
+
+    /// Parses the `{ name [: value], ... }` body of a struct literal,
+    /// given the already-parsed leading `path` (S6.3c). Field shorthand
+    /// `Point { x }` records `value = Expr::Ident(x)`. Field initialiser
+    /// values are parsed in a delimited (struct-literals-allowed) context.
+    fn parse_struct_literal_body(&mut self, path: Vec<Ident>) -> Expr {
+        let start = path.first().expect("non-empty struct path").span.start;
+        self.expect(TokenKind::LBrace, "`{`");
+        let mut fields: Vec<StructLitField> = Vec::new();
+        loop {
+            let tok = self.peek();
+            if matches!(tok.kind, TokenKind::RBrace | TokenKind::Eof) {
+                break;
+            }
+            let name = self.expect_ident("field name in struct literal");
+            let name_span = name.span;
+            let value = if self.peek().kind == TokenKind::Colon {
+                self.advance();
+                self.parse_delimited_expr()
+            } else {
+                // Shorthand `Point { x }` ≡ `Point { x: x }`.
+                Expr::Ident(name.clone())
+            };
+            let end = value.span().end;
+            fields.push(StructLitField {
+                name,
+                value,
+                span: Span::new(name_span.start, end),
+            });
+            if self.peek().kind == TokenKind::Comma {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        let close = self.expect(TokenKind::RBrace, "`}`");
+        Expr::StructLit {
+            path,
+            fields,
+            span: Span::new(start, close.span.end),
         }
     }
 }
@@ -2130,7 +2219,10 @@ mod assign_tests {
         let r = parse_expr("x = 1 + 2");
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         if let Expr::Assign { value, .. } = &r.expr {
-            assert!(matches!(value.as_ref(), Expr::Binary { op: BinOp::Add, .. }));
+            assert!(matches!(
+                value.as_ref(),
+                Expr::Binary { op: BinOp::Add, .. }
+            ));
         } else {
             panic!("expected Assign, got {:?}", r.expr);
         }
@@ -2191,5 +2283,102 @@ mod assign_tests {
         } else {
             panic!("expected For, got {:?}", r2.expr);
         }
+    }
+}
+
+#[cfg(test)]
+mod struct_lit_tests {
+    use super::{parse_expr, parse_source};
+    use capy_ast::Expr;
+
+    #[test]
+    fn struct_literal_parses_in_value_position() {
+        let r = parse_expr("Point { x: 1, y: 2 }");
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        if let Expr::StructLit { path, fields, .. } = &r.expr {
+            assert_eq!(path.len(), 1);
+            assert_eq!(path[0].name, "Point");
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name.name, "x");
+            assert_eq!(fields[1].name.name, "y");
+        } else {
+            panic!("expected StructLit, got {:?}", r.expr);
+        }
+    }
+
+    #[test]
+    fn struct_literal_shorthand_records_ident_value() {
+        let r = parse_expr("P { x }");
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        if let Expr::StructLit { fields, .. } = &r.expr {
+            assert_eq!(fields.len(), 1);
+            assert!(matches!(&fields[0].value, Expr::Ident(id) if id.name == "x"));
+        } else {
+            panic!("expected StructLit, got {:?}", r.expr);
+        }
+    }
+
+    #[test]
+    fn qualified_struct_literal_keeps_path() {
+        let r = parse_expr("m::Point { x: 1 }");
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        if let Expr::StructLit { path, .. } = &r.expr {
+            assert_eq!(path.len(), 2);
+            assert_eq!(path[1].name, "Point");
+        } else {
+            panic!("expected StructLit, got {:?}", r.expr);
+        }
+    }
+
+    #[test]
+    fn if_head_does_not_parse_struct_literal() {
+        // `cond` must be the condition (an identifier); the `{` opens the
+        // then-block, not a struct literal. Regression guard for the
+        // `no_struct_literal` context (S6.3c).
+        let r = parse_expr("if cond { 1 } else { 2 }");
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        if let Expr::If { cond, .. } = &r.expr {
+            assert!(matches!(cond.as_ref(), Expr::Ident(id) if id.name == "cond"));
+        } else {
+            panic!("expected If, got {:?}", r.expr);
+        }
+    }
+
+    #[test]
+    fn match_scrutinee_is_not_a_struct_literal() {
+        let r = parse_expr("match v { _ => 0 }");
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        if let Expr::Match { scrutinee, .. } = &r.expr {
+            assert!(matches!(scrutinee.as_ref(), Expr::Ident(id) if id.name == "v"));
+        } else {
+            panic!("expected Match, got {:?}", r.expr);
+        }
+    }
+
+    #[test]
+    fn while_head_does_not_parse_struct_literal() {
+        let r = parse_expr("while running { 1 }");
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        assert!(matches!(&r.expr, Expr::While { .. }));
+    }
+
+    #[test]
+    fn struct_literal_is_allowed_inside_a_block_in_a_head() {
+        // The `{` after `cond` opens the block; inside it, a struct literal
+        // is allowed again (the suppression is reset by `parse_block_expr`).
+        let r = parse_source(
+            "struct P { x: Int }\nfn main() { if cond { let p = P { x: 1 }; p } else { 0 } }\n",
+        );
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+    }
+
+    #[test]
+    fn struct_literal_is_allowed_inside_call_args_in_a_head() {
+        // Inside `f(...)` the suppression is reset, so `P { x: 1 }` parses
+        // as a struct literal even though the call sits in an `if` head.
+        let r = parse_source(
+            "struct P { x: Int }\nfn f(p: Int) { p }\nfn main() { if f(P { x: 1 }) { 1 } else { 0 } }\n",
+        );
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
     }
 }

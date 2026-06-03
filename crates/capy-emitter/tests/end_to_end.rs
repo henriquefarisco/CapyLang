@@ -743,19 +743,22 @@ fn match_arm_bindings_do_not_leak_across_arms() {
 }
 
 #[test]
-fn match_unsupported_pattern_emits_typed_error() {
-    // Struct patterns remain unsupported in the current cut; the
-    // emitter reports a `UnsupportedFeature` with a span pointing at
-    // the pattern. (Range and or-patterns are now supported and have
-    // their own positive tests below.)
-    let parsed = parse_source("fn main() { match 1 { Point { x } => x, _ => 0 } }\n");
+fn match_struct_pattern_lowers_with_get_tag_and_get_field() {
+    let parsed = parse_source(
+        "struct Point { x: Int, y: Int }\n\
+         fn main() { let p = Point { x: 7, y: 9 }; match p { Point { x } => x, _ => 0 } }\n",
+    );
     let out = emit(&parsed.source);
-    assert!(!out.errors.is_empty());
-    assert!(out.errors.iter().any(|e| matches!(
-        &e.kind,
-        capy_emitter::EmitErrorKind::UnsupportedFeature { what }
-            if what.contains("struct pattern")
-    )));
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_table, _consts, ins) = decode_first_fn(&out.module);
+    assert!(
+        ins.iter().any(|i| matches!(i, Instruction::GetTag)),
+        "expected get_tag in {ins:?}"
+    );
+    assert!(
+        ins.iter().any(|i| matches!(i, Instruction::GetField(0))),
+        "expected get_field 0 in {ins:?}"
+    );
 }
 
 #[test]
@@ -904,6 +907,109 @@ fn bitwise_not_lowers_to_bnot_opcode() {
         vec![
             Instruction::LoadConst(0),
             Instruction::BitNot,
+            Instruction::Return,
+        ]
+    );
+}
+
+// --- S6.3b: enum construction + match lowering -------------------------
+
+#[test]
+fn unit_variant_lowers_to_make_aggregate() {
+    // `Color::Blue` is the third declared variant → tag 2, no fields.
+    let parsed = parse_source("enum Color { Red, Green, Blue }\nfn main() { Color::Blue }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_table, _consts, ins) = decode_first_fn(&out.module);
+    assert_eq!(
+        ins,
+        vec![
+            Instruction::MakeAggregate {
+                tag: 2,
+                field_count: 0,
+            },
+            Instruction::Return,
+        ]
+    );
+}
+
+#[test]
+fn tuple_variant_lowers_to_args_then_make_aggregate() {
+    // `Box::Val(9)` pushes the field then builds a 1-field aggregate.
+    let parsed = parse_source("enum Box { Val(Int), Empty }\nfn main() { Box::Val(9) }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_table, consts, ins) = decode_first_fn(&out.module);
+    assert_eq!(consts.entries, vec![Constant::Int(9)]);
+    assert_eq!(
+        ins,
+        vec![
+            Instruction::LoadConst(0),
+            Instruction::MakeAggregate {
+                tag: 0,
+                field_count: 1,
+            },
+            Instruction::Return,
+        ]
+    );
+}
+
+#[test]
+fn enum_declaration_emits_no_code_and_no_errors() {
+    // The enum contributes no function entry; only `main` is emitted.
+    let parsed = parse_source("enum E { A, B }\nfn main() {}\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (table, _consts, ins) = decode_first_fn(&out.module);
+    assert_eq!(table.entries.len(), 1);
+    assert_eq!(table.entries[0].name, "main");
+    assert_eq!(ins, vec![Instruction::LoadNone, Instruction::Return]);
+}
+
+#[test]
+fn match_tuple_variant_lowers_with_get_tag_and_get_field() {
+    let parsed = parse_source(
+        "enum Box { Val(Int), Empty }\n\
+         fn main() { match Box::Val(5) { Box::Val(x) => x, Box::Empty => 0 } }\n",
+    );
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_table, _consts, ins) = decode_first_fn(&out.module);
+    assert!(
+        ins.iter().any(|i| matches!(i, Instruction::GetTag)),
+        "expected get_tag in {ins:?}"
+    );
+    assert!(
+        ins.iter().any(|i| matches!(i, Instruction::GetField(0))),
+        "expected get_field 0 in {ins:?}"
+    );
+    assert!(
+        ins.iter()
+            .any(|i| matches!(i, Instruction::MakeAggregate { .. })),
+        "expected make_aggregate in {ins:?}"
+    );
+}
+
+#[test]
+fn struct_literal_emits_fields_in_declaration_order() {
+    // The literal lists `y` first, but the emitter must push `x`'s value
+    // (10) before `y`'s value (20) so field 0 is `x` (S6.3c). The const
+    // pool is interned in emission order, so x's constant gets index 0.
+    let parsed =
+        parse_source("struct Point { x: Int, y: Int }\nfn main() { Point { y: 20, x: 10 } }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_table, consts, ins) = decode_first_fn(&out.module);
+    assert_eq!(consts.entries, vec![Constant::Int(10), Constant::Int(20)]);
+    assert_eq!(
+        ins,
+        vec![
+            Instruction::LoadConst(0), // x = 10 (declared first)
+            Instruction::LoadConst(1), // y = 20
+            Instruction::MakeAggregate {
+                tag: 0,
+                field_count: 2,
+            },
             Instruction::Return,
         ]
     );

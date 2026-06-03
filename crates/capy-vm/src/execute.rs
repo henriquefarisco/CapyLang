@@ -404,6 +404,41 @@ impl<'a> ExecState<'a> {
                         }
                     }
                 }
+                Instruction::MakeAggregate { tag, field_count } => {
+                    let n = field_count as usize;
+                    if self.stack.len() < n {
+                        return Err(VmError::StackUnderflow { pc });
+                    }
+                    // The top `n` operands become the fields, in source
+                    // order (the first-pushed value is field 0).
+                    let start = self.stack.len() - n;
+                    let fields: Vec<Value> = self.stack.split_off(start);
+                    self.stack.push(Value::Aggregate {
+                        tag,
+                        fields: Rc::new(RefCell::new(fields)),
+                    });
+                }
+                Instruction::GetField(index) => {
+                    let agg = self.pop(pc)?;
+                    let field = aggregate_field(pc, &agg, index, "get_field")?;
+                    self.stack.push(field);
+                }
+                Instruction::GetTag => {
+                    let agg = self.pop(pc)?;
+                    match &agg {
+                        Value::Aggregate { tag, .. } => {
+                            self.stack.push(Value::Int(i64::from(*tag)));
+                        }
+                        other => {
+                            return Err(VmError::TypeMismatch {
+                                pc,
+                                op: "get_tag",
+                                expected: "aggregate",
+                                found: other.type_name(),
+                            });
+                        }
+                    }
+                }
                 Instruction::Jump(offset) => {
                     let after_imm = pc as i64 + ins.width() as i64;
                     let target = after_imm + offset as i64;
@@ -780,6 +815,32 @@ fn expect_index(pc: u32, v: &Value, op: &'static str) -> Result<i64, VmError> {
             found: other.type_name(),
         }),
     }
+}
+
+/// Resolves `agg.fields[index]` for `GetField`, cloning the field out.
+///
+/// Requires `agg` to be an `Aggregate`; a field index outside
+/// `0..fields.len()` traps fail-closed with `FieldOutOfBounds`. The
+/// field index is a `u32` immediate (always non-negative), so only the
+/// upper bound needs checking.
+fn aggregate_field(pc: u32, agg: &Value, index: u32, op: &'static str) -> Result<Value, VmError> {
+    let cell = match agg {
+        Value::Aggregate { fields, .. } => fields,
+        other => {
+            return Err(VmError::TypeMismatch {
+                pc,
+                op,
+                expected: "aggregate",
+                found: other.type_name(),
+            });
+        }
+    };
+    let fields = cell.borrow();
+    let len = fields.len();
+    if index as usize >= len {
+        return Err(VmError::FieldOutOfBounds { pc, index, len });
+    }
+    Ok(fields[index as usize].clone())
 }
 
 fn apply_ord_i64(kind: Ordering, x: i64, y: i64) -> bool {
@@ -1330,5 +1391,169 @@ mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    // --- S6.3a: aggregate value model (struct / enum at runtime) --------
+
+    #[test]
+    fn make_aggregate_then_get_tag_recovers_the_discriminant() {
+        // load_const 0 (field); make_aggregate(tag=7, 1); get_tag; return
+        let code = encode(&[
+            Instruction::LoadConst(0),
+            Instruction::MakeAggregate {
+                tag: 7,
+                field_count: 1,
+            },
+            Instruction::GetTag,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(99)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        assert_eq!(vm.run("main").unwrap(), Value::Int(7));
+    }
+
+    #[test]
+    fn get_field_reads_the_declared_component() {
+        // Build an aggregate of two fields, then read field 1.
+        let code = encode(&[
+            Instruction::LoadConst(0),
+            Instruction::LoadConst(1),
+            Instruction::MakeAggregate {
+                tag: 0,
+                field_count: 2,
+            },
+            Instruction::GetField(1),
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(10), Constant::Int(20)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        assert_eq!(vm.run("main").unwrap(), Value::Int(20));
+    }
+
+    #[test]
+    fn get_field_out_of_range_traps_with_field_out_of_bounds() {
+        // 1-field aggregate, but get_field 5.
+        let code = encode(&[
+            Instruction::LoadConst(0),
+            Instruction::MakeAggregate {
+                tag: 0,
+                field_count: 1,
+            },
+            Instruction::GetField(5),
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(1)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        match vm.run("main").unwrap_err() {
+            VmError::FieldOutOfBounds { index, len, .. } => {
+                assert_eq!(index, 5);
+                assert_eq!(len, 1);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_tag_on_non_aggregate_traps_with_type_mismatch() {
+        let code = encode(&[
+            Instruction::LoadConst(0),
+            Instruction::GetTag,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(1)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        match vm.run("main").unwrap_err() {
+            VmError::TypeMismatch { op, found, .. } => {
+                assert_eq!(op, "get_tag");
+                assert_eq!(found, "int");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_field_on_non_aggregate_traps_with_type_mismatch() {
+        let code = encode(&[
+            Instruction::LoadConst(0),
+            Instruction::GetField(0),
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(1)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        match vm.run("main").unwrap_err() {
+            VmError::TypeMismatch { op, found, .. } => {
+                assert_eq!(op, "get_field");
+                assert_eq!(found, "int");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn aggregate_fields_compose_with_locals_and_arithmetic() {
+        // Models `let p = Point { x: 3, y: 4 }; p.x + p.y` lowered by a
+        // future S6.3c emitter: build the aggregate, bind it to a local,
+        // then read both fields back and add them. Proves S6.3a composes
+        // with S2.4 locals and the arithmetic opcodes.
+        let code = encode(&[
+            Instruction::LoadConst(0), // x = 3
+            Instruction::LoadConst(1), // y = 4
+            Instruction::MakeAggregate {
+                tag: 0,
+                field_count: 2,
+            },
+            Instruction::StoreLocal(0),
+            Instruction::LoadLocal(0),
+            Instruction::GetField(0), // p.x
+            Instruction::LoadLocal(0),
+            Instruction::GetField(1), // p.y
+            Instruction::Add,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(3), Constant::Int(4)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 1,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        assert_eq!(vm.run("main").unwrap(), Value::Int(7));
     }
 }

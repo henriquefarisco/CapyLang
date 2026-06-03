@@ -1,10 +1,48 @@
 # S6.3 - struct / enum at runtime + match aggregate lowering (design)
 
-Status: **draft / design.** Specifies slice **S6.3** of `docs/roadmap.md`.
-Not implemented; opcodes and the `Value` shape below enter the frozen
-contract (`docs/bytecode-v0.md`, `docs/compatibility.md`) only when
-implemented and `make rust-validate` passes. Builds directly on the S6.2
-aggregate machinery (`docs/aggregates.md`).
+Status: **S6.3a + S6.3b + S6.3c implemented (pending external
+validation).** Specifies slice **S6.3** of `docs/roadmap.md`, now
+feature-complete: `enum` and `struct` values can be constructed and
+destructured via `match`. Field-access `p.x` stays deferred to the type
+checker.
+
+- **S6.3a** (runtime value model `Value::Aggregate { tag, fields }`, the
+  three opcodes `make_aggregate` 0x64 / `get_field` 0x65 / `get_tag`
+  0x66, verifier stack effects, VM semantics, `V0018 FIELD_OUT_OF_BOUNDS`)
+  is implemented in `capy-bytecode` / `capy-vm`.
+- **S6.3b** (emitter lowering) is implemented in `capy-emitter`: a pass-0
+  registry assigns each enum variant a wire-opaque `tag`; unit-variant
+  construction (`Color::Red`, a `Path`) lowers to `MakeAggregate(tag, 0)`;
+  tuple-variant construction (`Some(5)` / `Color::Pair(a, b)`, a `Call`)
+  lowers to the args plus `MakeAggregate(tag, argc)`; `match` `Path` /
+  `TupleStruct` arms lower to a `GetTag` discriminant test plus recursive
+  `GetField` field extraction. No new opcodes. `enum` items now emit no
+  diagnostic (they only populate the registry).
+- **S6.3c** (struct support) is implemented across `capy-ast` /
+  `capy-parser` / `capy-emitter`: the new `Expr::StructLit { path,
+  fields, span }` AST node + `StructLitField`; a parser `no_struct_literal`
+  context (set in `if` / `while` / `match` heads and `for` bounds, reset
+  inside every delimiter) so `Path { ... }` is a block boundary there and
+  a struct literal elsewhere; a pass-0 struct registry (tag + declared
+  field order); literal construction that reorders initialisers into
+  declared order then `MakeAggregate`; and `match` `Struct` lowering
+  (`GetTag` test + per-field `GetField` resolved by name). No new opcodes;
+  `struct` items now emit no diagnostic.
+
+All three sub-slices are promoted into `docs/bytecode-v0.md` and
+`docs/compatibility.md`; they still need `make rust-validate` on a build
+machine before they are committed. The struct-literal parser change is
+the highest-risk part: the lexer/parser golden fixtures and the
+control-flow fixtures must be re-run to confirm no regression.
+Builds directly on the S6.2 aggregate machinery (`docs/aggregates.md`).
+
+> v0 resolution note (S6.3b): construction and `match` resolve a variant
+> by its name (the path's last segment), so variant names should be
+> unique across enums; a duplicate keeps the first declaration. A bare
+> single-segment unit variant in value/pattern position is treated as an
+> ordinary identifier (binding) — write unit variants qualified
+> (`Enum::Variant`) until a name resolver lands. `None` stays the built-in
+> none literal, not an enum variant.
 
 S6.3 makes `struct` and `enum` usable at runtime and completes the
 `match` lowering for the `TupleStruct` / `Struct` / `Path` patterns that

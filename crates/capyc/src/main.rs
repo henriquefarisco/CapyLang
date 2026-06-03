@@ -171,7 +171,11 @@ fn cmd_check(args: &[String]) -> Result<ExitCode, String> {
     let path = take_path_arg(args)?;
     let source = read_source(&path)?;
     // Label shown in each rendered `--> <file>:<line>:<col>` header.
-    let file = if path == "-" { "<stdin>" } else { path.as_str() };
+    let file = if path == "-" {
+        "<stdin>"
+    } else {
+        path.as_str()
+    };
     let parsed = parse_source(&source);
     if !parsed.diagnostics.is_empty() {
         // Lexer diagnostics are already threaded into the parser output as
@@ -411,7 +415,7 @@ fn cmd_run(args: &[String]) -> Result<ExitCode, String> {
 // ---------------------------------------------------------------------
 
 fn cmd_repl(args: &[String]) -> Result<ExitCode, String> {
-    for a in args {
+    if let Some(a) = args.first() {
         match a.as_str() {
             "-h" | "--help" => {
                 print!("{USAGE}");
@@ -564,6 +568,13 @@ fn format_value(v: &Value) -> String {
         Value::Array(a) => {
             let parts: Vec<String> = a.borrow().iter().map(format_value).collect();
             format!("[{}]", parts.join(", "))
+        }
+        Value::Aggregate { tag, fields } => {
+            // Deterministic, structural rendering: `#<tag>(field, ...)`.
+            // Naming lives in the emitter, so the CLI shows the opaque
+            // tag plus the recursively formatted fields.
+            let parts: Vec<String> = fields.borrow().iter().map(format_value).collect();
+            format!("#{tag}({})", parts.join(", "))
         }
     }
 }

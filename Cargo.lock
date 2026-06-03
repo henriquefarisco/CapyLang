@@ -36,21 +36,21 @@ dependencies = [
 
 [[package]]
 name = "capy-ast"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "capy-lexer",
 ]
 
 [[package]]
 name = "capy-bytecode"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "blake3",
 ]
 
 [[package]]
 name = "capy-diagnostics"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "capy-bytecode",
  "capy-emitter",
@@ -61,7 +61,7 @@ dependencies = [
 
 [[package]]
 name = "capy-emitter"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "capy-ast",
  "capy-bytecode",
@@ -71,14 +71,14 @@ dependencies = [
 
 [[package]]
 name = "capy-lexer"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "logos",
 ]
 
 [[package]]
 name = "capy-parser"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "capy-ast",
  "capy-lexer",
@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "capy-vm"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "capy-bytecode",
  "capy-emitter",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "capyc"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "capy-ast",
  "capy-bytecode",
@@ -108,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "capyc-tokens"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "capy-lexer",
 ]
