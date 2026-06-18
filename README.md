@@ -1,6 +1,6 @@
 # CapyLang
 
-Version: 0.1.9
+Version: 0.1.10
 
 CapyLang is the external language-core repository for CapyOS.
 

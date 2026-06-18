@@ -10,6 +10,15 @@ Slice identifiers (e.g. **S1**, **S2**) refer to the roadmap captured in
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-06-18
+
+### Added
+- S10: integer `min(a, b)` / `max(a, b)` numeric builtins. Emitter-only
+  lowering onto the existing compare + conditional-jump opcodes (no new wire,
+  no new const-pool use); a user-defined `min` / `max` still shadows the
+  builtin. Wrong arity is reported as `E0022` (message generalized from
+  array-method-specific to also cover numeric builtins).
+
 ## [0.1.9] - 2026-06-17
 
 ### Added

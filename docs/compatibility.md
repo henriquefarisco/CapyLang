@@ -163,8 +163,10 @@ Current ABI surface:
   `INVALID_ASSIGN_TARGET`; S10 added `E0022` `METHOD_ARITY`).
   S10 also lowers source-level array methods (`a.push(x)`, `a.pop()`,
   `a.insert(i, x)`, `a.remove(i)`, `a.get(i)`, `a.set(i, x)`, `a.len()`)
-  onto the existing `0x60-0x6A` opcodes (no new wire). Lowers the
-  v0 subset of the frontend — literals, locals, paren, unary
+  onto the existing `0x60-0x6A` opcodes (no new wire), plus integer
+  `min(a, b)` / `max(a, b)` builtins lowered to compare + conditional-jump
+  (also no new wire; a user-defined `min` / `max` shadows the builtin).
+  Lowers the v0 subset of the frontend — literals, locals, paren, unary
   `Neg`/`Not`/`BitNot`, arithmetic + comparison + integer
   bitwise/shift binary operators (`&` `|` `^` `<<` `>>`),
   short-circuit `&&` / `||`, blocks, `let`, assignment to locals and to

@@ -224,6 +224,37 @@ fn nested_if_picks_innermost_branch() {
 }
 
 #[test]
+fn min_max_builtins_compute_at_runtime() {
+    // min/max lower to the same compare+select shape as `if`, so prove they
+    // pick the right value at runtime in both argument orderings (catching a
+    // min/max branch swap) plus the equal-args and negative edge cases.
+    assert_eq!(
+        run_source("fn main() { min(3, 5) }\n").unwrap(),
+        Value::Int(3)
+    );
+    assert_eq!(
+        run_source("fn main() { min(5, 3) }\n").unwrap(),
+        Value::Int(3)
+    );
+    assert_eq!(
+        run_source("fn main() { max(3, 5) }\n").unwrap(),
+        Value::Int(5)
+    );
+    assert_eq!(
+        run_source("fn main() { max(5, 3) }\n").unwrap(),
+        Value::Int(5)
+    );
+    assert_eq!(
+        run_source("fn main() { min(4, 4) }\n").unwrap(),
+        Value::Int(4)
+    );
+    assert_eq!(
+        run_source("fn main() { max(-2, 7) }\n").unwrap(),
+        Value::Int(7)
+    );
+}
+
+#[test]
 fn explicit_return_short_circuits() {
     assert_eq!(
         run_source("fn main() { return 7; }\n").unwrap(),

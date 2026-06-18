@@ -362,6 +362,84 @@ fn unknown_method_is_reported() {
 }
 
 #[test]
+fn min_builtin_lowers_to_compare_select() {
+    // min(a, b) stores both args, compares with Le, and branches — the same
+    // shape as an `if`. With params a=local0, b=local1 the temporaries are
+    // locals 2 and 3; on `lhs <= rhs` it selects the lhs (the smaller).
+    let parsed = parse_source("fn f(a: i32, b: i32) { min(a, b) }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_t, _consts, ins) = decode_first_fn(&out.module);
+    assert_eq!(ins[0], Instruction::LoadLocal(0)); // a
+    assert_eq!(ins[1], Instruction::StoreLocal(2));
+    assert_eq!(ins[2], Instruction::LoadLocal(1)); // b
+    assert_eq!(ins[3], Instruction::StoreLocal(3));
+    assert_eq!(ins[4], Instruction::LoadLocal(2));
+    assert_eq!(ins[5], Instruction::LoadLocal(3));
+    assert_eq!(ins[6], Instruction::Le);
+    assert!(matches!(ins[7], Instruction::JumpIfFalse(_)));
+    assert_eq!(ins[8], Instruction::LoadLocal(2)); // lhs <= rhs -> min = a
+    assert!(matches!(ins[9], Instruction::Jump(_)));
+    assert_eq!(ins[10], Instruction::LoadLocal(3)); // else -> b
+    assert_eq!(ins[11], Instruction::Return);
+    assert_eq!(ins.len(), 12);
+}
+
+#[test]
+fn max_builtin_selects_the_other_branch() {
+    // max mirrors min but selects the rhs on `lhs <= rhs`.
+    let parsed = parse_source("fn f(a: i32, b: i32) { max(a, b) }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_t, _consts, ins) = decode_first_fn(&out.module);
+    assert_eq!(ins[6], Instruction::Le);
+    assert!(matches!(ins[7], Instruction::JumpIfFalse(_)));
+    assert_eq!(ins[8], Instruction::LoadLocal(3)); // lhs <= rhs -> max = b
+    assert!(matches!(ins[9], Instruction::Jump(_)));
+    assert_eq!(ins[10], Instruction::LoadLocal(2)); // else -> a
+    assert_eq!(ins[11], Instruction::Return);
+    assert_eq!(ins.len(), 12);
+}
+
+#[test]
+fn min_builtin_wrong_arity_is_reported() {
+    // the numeric built-ins want exactly two arguments; one is E0022.
+    let parsed = parse_source("fn f(a: i32) { min(a) }\n");
+    let out = emit(&parsed.source);
+    assert_eq!(out.errors.len(), 1);
+    assert_eq!(out.errors[0].code(), "E0022");
+    assert!(matches!(
+        out.errors[0].kind,
+        capy_emitter::EmitErrorKind::MethodArity {
+            want: 2,
+            got: 1,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn user_fn_min_takes_precedence_over_builtin() {
+    // A user-declared `fn min` resolves as an ordinary call (here one arg),
+    // shadowing the two-argument numeric built-in — so no compare/select.
+    let parsed = parse_source("fn min(x: i32) -> i32 { x }\nfn g() { min(7) }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let functions_section = out
+        .module
+        .sections
+        .iter()
+        .find(|s| s.tag == SectionTag::Functions)
+        .expect("functions section");
+    let functions = FunctionTable::decode(&functions_section.payload).expect("decode");
+    let g = decode(&functions.entries[1].code).expect("decode g");
+    assert!(g
+        .iter()
+        .any(|i| matches!(i, Instruction::Call { argc: 1, .. })));
+    assert!(!g.iter().any(|i| matches!(i, Instruction::Le)));
+}
+
+#[test]
 fn break_with_value_inside_loop_compiles() {
     let parsed = parse_source("fn br() { loop { break 7; } }\n");
     let out = emit(&parsed.source);

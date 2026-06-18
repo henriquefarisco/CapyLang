@@ -1315,6 +1315,10 @@ impl<'a> FunctionEmitter<'a> {
             CallTarget::Local(fn_idx)
         } else if let Some(&import_idx) = self.import_index.get(name) {
             CallTarget::Host(import_idx)
+        } else if name == "min" || name == "max" {
+            // S10 numeric built-ins, only when the name resolves to no user
+            // `fn`/`import` (so a user-declared `fn min` keeps precedence).
+            return self.emit_minmax_builtin(name, args, span);
         } else {
             return Err(EmitError::new(
                 EmitErrorKind::UnknownFunction { name: name.clone() },
@@ -1343,6 +1347,57 @@ impl<'a> FunctionEmitter<'a> {
                 Instruction::HostCall { import_idx, argc }.encode_into(&mut self.code);
             }
         }
+        Ok(())
+    }
+
+    /// Lowers the integer built-ins `min(a, b)` / `max(a, b)` onto a
+    /// compare-and-branch (S10 numeric helpers; no new opcode). Both
+    /// arguments are evaluated once into temporaries, compared with `Le`,
+    /// and the selected temporary is loaded on each branch — the same shape
+    /// as an `if` expression, so the verifier's stack discipline holds.
+    fn emit_minmax_builtin(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<(), EmitError> {
+        let is_min = name == "min";
+        let method_lit = if is_min { "min" } else { "max" };
+        if args.len() != 2 {
+            return Err(EmitError::new(
+                EmitErrorKind::MethodArity {
+                    method: method_lit,
+                    want: 2,
+                    got: args.len(),
+                },
+                span,
+            ));
+        }
+        let lhs_slot = self.alloc_unnamed_local();
+        let rhs_slot = self.alloc_unnamed_local();
+        self.emit_expr(&args[0])?;
+        self.emit_op(Opcode::StoreLocal);
+        self.emit_u32(lhs_slot);
+        self.emit_expr(&args[1])?;
+        self.emit_op(Opcode::StoreLocal);
+        self.emit_u32(rhs_slot);
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(lhs_slot);
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(rhs_slot);
+        self.emit_op(Opcode::Le); // lhs <= rhs
+        let else_label = self.new_label();
+        let end_label = self.new_label();
+        self.emit_jump(Opcode::JumpIfFalse, else_label, span);
+        // lhs <= rhs: min selects lhs, max selects rhs.
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(if is_min { lhs_slot } else { rhs_slot });
+        self.emit_jump(Opcode::Jump, end_label, span);
+        self.mark_label(else_label);
+        // lhs > rhs: min selects rhs, max selects lhs.
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(if is_min { rhs_slot } else { lhs_slot });
+        self.mark_label(end_label);
         Ok(())
     }
 

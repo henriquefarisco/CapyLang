@@ -67,9 +67,9 @@ pub const E_DUPLICATE_IMPORT: &str = "E0020";
 /// simple local identifier on the left of `=`; field, index, call, path
 /// and parenthesised targets are rejected here.
 pub const E_INVALID_ASSIGN_TARGET: &str = "E0021";
-/// A built-in array method call (`a.push(x)`, `a.insert(i, x)`, ...) was
-/// given the wrong number of arguments for that method. Introduced by the
-/// S10 array-method frontend lowering.
+/// A built-in call was given the wrong number of arguments — an array
+/// method (`a.push(x)`, `a.insert(i, x)`, ...) or a numeric helper
+/// (`min(a, b)`, `max(a, b)`). Introduced by the S10 frontend lowering.
 pub const E_METHOD_ARITY: &str = "E0022";
 
 /// Classification of a single emitter failure.
@@ -252,7 +252,7 @@ impl EmitError {
                 format!("cannot assign to {what}; only a local variable is assignable")
             }
             EmitErrorKind::MethodArity { method, want, got } => {
-                format!("array method `{method}` expects {want} argument(s), got {got}")
+                format!("built-in `{method}` expects {want} argument(s), got {got}")
             }
         }
     }
