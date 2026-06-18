@@ -72,8 +72,76 @@ shared backing and pushes the **same** array handle back (so the result is
 usable as an expression and as the right-hand input of a store).
 
 These four byte values are additive: adding them does not touch any
-existing opcode. Unused bytes in `0x64-0x6F` stay reserved for future
-aggregate ops (`array_push`, `array_pop`, tuple / struct ops in S6.3).
+existing opcode. The tagged-aggregate ops `make_aggregate` / `get_field`
+/ `get_tag` took `0x64-0x66` (S6.3a), and the growable-array ops
+`array_push` / `array_pop` took `0x67-0x68` (S6.2b, below); the rest of
+`0x60-0x6F` stays reserved for future aggregate ops (e.g. `make_tuple`).
+
+## Growable arrays (S6.2b, additive — implemented, pending validation)
+
+S6.2 ships *fixed-capacity* arrays: `make_array n` allocates exactly `n`
+slots and there is no way to change the length afterwards, so "the snake
+body" is only expressible if its maximum size is known up front. S6.2b
+removes that wall with the two `Vec`-style opcodes:
+
+| Byte | Mnemonic     | Immediate | Stack effect                                  |
+|-----:|--------------|-----------|-----------------------------------------------|
+| 0x67 | `array_push` | -         | `arr val -> arr` (appends `val`, grows by one) |
+| 0x68 | `array_pop`  | -         | `arr -> val` (removes + returns the last elem) |
+
+- `array_push` pops `(arr, val)`, requires `arr` is an `Array` (else
+  `V0005 TYPE_MISMATCH`), appends `val` to the shared backing in place and
+  pushes the **same** array handle back (reference semantics, mirroring
+  `array_set`). The new element lands at index `len-1`.
+- `array_pop` pops `arr` (require `Array`), removes the last element and
+  pushes it. Popping an empty array is fail-closed with the new
+  `V0019 POP_EMPTY_ARRAY` trap (kept distinct from the index-oriented
+  `V0017` so the message stays precise).
+- Verifier stack effects: `ArrayPush` `required_inputs = 2`,
+  `produced_outputs = 1`; `ArrayPop` `required_inputs = 1`,
+  `produced_outputs = 1`. Both are ordinary (non-control-flow)
+  instructions, so only the two stack-effect tables need new arms.
+- Determinism preserved: no length cap beyond the host's memory; push /
+  pop are O(1) amortised; no iteration-order ambiguity.
+
+This sub-slice is **bytecode + VM only** (testable by building modules
+directly, like S6.3a); the `a.push(x)` / `a.pop()` frontend surface waits
+on the method-call / stdlib work (S10).
+
+## Insert / remove (S6.2c, additive — implemented, pending validation)
+
+S6.2b only grows / shrinks at the tail. S6.2c adds **positional** insert /
+remove so the body can splice at an arbitrary index, with the two remaining
+`Vec`-style opcodes:
+
+| Byte | Mnemonic       | Immediate | Stack effect                                       |
+|-----:|----------------|-----------|----------------------------------------------------|
+| 0x69 | `array_insert` | -         | `arr idx val -> arr` (inserts at `idx`, grows by one) |
+| 0x6A | `array_remove` | -         | `arr idx -> val` (removes + returns the elem at `idx`) |
+
+- `array_insert` pops `(arr, idx, val)`, requires `arr` is an `Array` (else
+  `V0005 TYPE_MISMATCH`) and `idx` an `Int`, inserts `val` at `idx` in the
+  shared backing in place (elements at `idx..` shift right) and pushes the
+  **same** array handle back (reference semantics, mirroring `array_set`).
+  The valid range is `0..=len`: `idx == len` appends, exactly like
+  `array_push`.
+- `array_remove` pops `(arr, idx)` (require `Array` + `Int`), removes the
+  element at `idx` (elements at `idx+1..` shift left) and pushes it. The
+  valid range is `0..len`.
+- Out-of-range is fail-closed with the existing `V0017 INDEX_OUT_OF_BOUNDS`
+  (negative index, `idx > len` for insert, or `idx >= len` for remove —
+  including any index into an empty array). No new trap is introduced: an
+  insert / remove is an index operation, so it shares `array_get` /
+  `array_set`'s index trap rather than minting a parallel code.
+- Verifier stack effects: `ArrayInsert` `required_inputs = 3`,
+  `produced_outputs = 1`; `ArrayRemove` `required_inputs = 2`,
+  `produced_outputs = 1`. Both are ordinary (non-control-flow) instructions,
+  so only the two stack-effect tables need new arms.
+- Determinism preserved: insert / remove are O(n) in the shift distance but
+  fully deterministic; no iteration-order ambiguity.
+
+This sub-slice is **bytecode + VM only**; the `a.insert(i, x)` /
+`a.remove(i)` frontend surface waits on the method-call / stdlib work (S10).
 
 ## Verifier stack effects (`capy-bytecode/src/verify.rs`)
 

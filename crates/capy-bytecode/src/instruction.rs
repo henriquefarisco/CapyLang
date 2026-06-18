@@ -69,6 +69,16 @@ pub enum Instruction {
     GetField(u32),
     /// `agg -> tag` (pushes the discriminant as an `Int`).
     GetTag,
+    /// `arr val -> arr` (appends `val` in place, grows the array).
+    ArrayPush,
+    /// `arr -> val` (removes and returns the last element in place).
+    ArrayPop,
+    /// `arr idx val -> arr` (inserts `val` at `idx` in place, grows the
+    /// array; `idx == len` appends, `idx > len` traps).
+    ArrayInsert,
+    /// `arr idx -> val` (removes and returns the element at `idx` in place,
+    /// shrinks the array; `idx >= len` traps).
+    ArrayRemove,
     Jump(i32),
     JumpIfFalse(i32),
     /// Call into another function in the same module.
@@ -136,6 +146,10 @@ impl Instruction {
             Self::MakeAggregate { .. } => Opcode::MakeAggregate,
             Self::GetField(_) => Opcode::GetField,
             Self::GetTag => Opcode::GetTag,
+            Self::ArrayPush => Opcode::ArrayPush,
+            Self::ArrayPop => Opcode::ArrayPop,
+            Self::ArrayInsert => Opcode::ArrayInsert,
+            Self::ArrayRemove => Opcode::ArrayRemove,
             Self::Jump(_) => Opcode::Jump,
             Self::JumpIfFalse(_) => Opcode::JumpIfFalse,
             Self::Call { .. } => Opcode::Call,
@@ -250,6 +264,10 @@ pub fn decode(code: &[u8]) -> Result<Vec<Instruction>, BytecodeError> {
             }
             Opcode::GetField => Instruction::GetField(read_u32(&mut cursor, op_pos)?),
             Opcode::GetTag => Instruction::GetTag,
+            Opcode::ArrayPush => Instruction::ArrayPush,
+            Opcode::ArrayPop => Instruction::ArrayPop,
+            Opcode::ArrayInsert => Instruction::ArrayInsert,
+            Opcode::ArrayRemove => Instruction::ArrayRemove,
             Opcode::Jump => Instruction::Jump(read_i32(&mut cursor, op_pos)?),
             Opcode::JumpIfFalse => Instruction::JumpIfFalse(read_i32(&mut cursor, op_pos)?),
             Opcode::Call => {
@@ -378,6 +396,10 @@ mod tests {
             },
             Instruction::GetField(1),
             Instruction::GetTag,
+            Instruction::ArrayPush,
+            Instruction::ArrayPop,
+            Instruction::ArrayInsert,
+            Instruction::ArrayRemove,
             Instruction::Jump(-4),
             Instruction::JumpIfFalse(8),
             Instruction::Call { fn_idx: 7, argc: 2 },

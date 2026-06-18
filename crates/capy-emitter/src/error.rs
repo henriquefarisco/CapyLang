@@ -67,31 +67,72 @@ pub const E_DUPLICATE_IMPORT: &str = "E0020";
 /// simple local identifier on the left of `=`; field, index, call, path
 /// and parenthesised targets are rejected here.
 pub const E_INVALID_ASSIGN_TARGET: &str = "E0021";
+/// A built-in array method call (`a.push(x)`, `a.insert(i, x)`, ...) was
+/// given the wrong number of arguments for that method. Introduced by the
+/// S10 array-method frontend lowering.
+pub const E_METHOD_ARITY: &str = "E0022";
 
 /// Classification of a single emitter failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EmitErrorKind {
-    UnsupportedExpr { what: &'static str },
-    UnsupportedItem { what: &'static str },
-    UnknownLocal { name: String },
-    DuplicateLocal { name: String },
-    IntegerParse { text: String },
-    FloatParse { text: String },
-    StringParse { reason: &'static str },
-    UnsupportedBinary { op: &'static str },
-    UnsupportedUnary { op: &'static str },
-    UnsupportedFeature { what: &'static str },
+    UnsupportedExpr {
+        what: &'static str,
+    },
+    UnsupportedItem {
+        what: &'static str,
+    },
+    UnknownLocal {
+        name: String,
+    },
+    DuplicateLocal {
+        name: String,
+    },
+    IntegerParse {
+        text: String,
+    },
+    FloatParse {
+        text: String,
+    },
+    StringParse {
+        reason: &'static str,
+    },
+    UnsupportedBinary {
+        op: &'static str,
+    },
+    UnsupportedUnary {
+        op: &'static str,
+    },
+    UnsupportedFeature {
+        what: &'static str,
+    },
     ParseErrorInExpr,
     TopLevelMustBeItem,
     NestedItem,
     BreakOutsideLoop,
     ContinueOutsideLoop,
-    UnknownFunction { name: String },
-    UnsupportedCallee { what: &'static str },
-    DuplicateFunction { name: String },
-    TooManyArguments { count: usize },
-    DuplicateImport { name: String },
-    InvalidAssignTarget { what: &'static str },
+    UnknownFunction {
+        name: String,
+    },
+    UnsupportedCallee {
+        what: &'static str,
+    },
+    DuplicateFunction {
+        name: String,
+    },
+    TooManyArguments {
+        count: usize,
+    },
+    DuplicateImport {
+        name: String,
+    },
+    InvalidAssignTarget {
+        what: &'static str,
+    },
+    MethodArity {
+        method: &'static str,
+        want: usize,
+        got: usize,
+    },
 }
 
 /// A single recoverable emitter error.
@@ -133,6 +174,7 @@ impl EmitError {
             EmitErrorKind::TooManyArguments { .. } => E_TOO_MANY_ARGUMENTS,
             EmitErrorKind::DuplicateImport { .. } => E_DUPLICATE_IMPORT,
             EmitErrorKind::InvalidAssignTarget { .. } => E_INVALID_ASSIGN_TARGET,
+            EmitErrorKind::MethodArity { .. } => E_METHOD_ARITY,
         }
     }
 
@@ -208,6 +250,9 @@ impl EmitError {
             }
             EmitErrorKind::InvalidAssignTarget { what } => {
                 format!("cannot assign to {what}; only a local variable is assignable")
+            }
+            EmitErrorKind::MethodArity { method, want, got } => {
+                format!("array method `{method}` expects {want} argument(s), got {got}")
             }
         }
     }

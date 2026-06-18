@@ -133,6 +133,8 @@ follows the full instruction (PC after decoding the immediate); offset
 | 0x64 | `make_aggregate` | `U32U32`  | `v0..vN-1 -> agg` (`tag`, N fields)     |
 | 0x65 | `get_field`      | `U32`     | `agg -> agg.fields[i]` (bounds-checked) |
 | 0x66 | `get_tag`        | —         | `agg -> tag` (Int discriminant)         |
+| 0x67 | `array_push`     | —         | `arr val -> arr` (appends in place)     |
+| 0x68 | `array_pop`      | —         | `arr -> val` (removes last in place)    |
 | 0x70 | `jump`           | `I32`     | unchanged (PC += imm)                   |
 | 0x71 | `jump_if_false`  | `I32`     | `a -> ` (jumps if `!a`)                 |
 | 0x80 | `call`           | `U32U32`  | `arg0..argN-1 -> ret` (transfer to fn)  |
@@ -179,8 +181,26 @@ traps with `V0018 FIELD_OUT_OF_BOUNDS`); `get_tag` pushes the aggregate's
 discriminant as an `Int` so a lowered `match` can branch on it. `tag` is
 emitter-assigned and wire-opaque — the VM only stores and compares it.
 `get_field` / `get_tag` on a non-aggregate trap with `V0005
-TYPE_MISMATCH`. The rest of the `0x60-0x6F` block stays reserved for
-future aggregate ops (e.g. `make_tuple`, in-place field writes). `match`
+TYPE_MISMATCH`. The growable-array opcodes `array_push` / `array_pop`
+(0x67-0x68) were added by S6.2b and extend the S6.2 array machinery with
+reference semantics: `array_push` pops `(arr, val)`, appends `val` to the
+end of `arr` in place (growing it by one) and pushes the **same** array
+handle back; `array_pop` pops `arr` and pushes its removed last element.
+Both trap with `V0005 TYPE_MISMATCH` on a non-array operand, and
+`array_pop` on an empty array traps with the new `V0019 POP_EMPTY_ARRAY`
+(kept distinct from the index-oriented `V0017` so the message stays
+precise). The positional opcodes `array_insert` / `array_remove`
+(0x69-0x6A) were added by S6.2c and complete the growable surface:
+`array_insert` pops `(arr, idx, val)`, inserts `val` at `idx` in place
+(shifting `idx..` right, growing by one; `idx == len` appends like
+`array_push`) and pushes the **same** array handle back; `array_remove`
+pops `(arr, idx)`, removes the element at `idx` (shifting `idx+1..` left,
+shrinking by one) and pushes it. Both reuse the index trap `V0017
+INDEX_OUT_OF_BOUNDS` for a negative index, `idx > len` (insert) or
+`idx >= len` (remove), and `V0005 TYPE_MISMATCH` on a non-array / non-int
+operand — no new trap. The rest of the `0x60-0x6F` block (0x6B-0x6F) stays
+reserved for future aggregate ops (e.g. `make_tuple`, in-place field
+writes). `match`
 (S2.2b) parses tuple-struct / struct / path patterns today; lowering them
 onto `get_tag` / `get_field` is S6.3b / S6.3c and adds no new opcodes.
 

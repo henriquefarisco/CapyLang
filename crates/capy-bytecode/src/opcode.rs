@@ -139,6 +139,26 @@ pub enum Opcode {
     /// `GetTag` — `agg -> tag` (pushes the discriminant as an `Int`) so a
     /// lowered `match` can branch on an aggregate's variant.
     GetTag = 0x66,
+    /// `ArrayPush` — `arr val -> arr`: append `val` to the end of `arr`
+    /// in place (reference semantics) and push the same array handle back.
+    /// Grows the array by one; the new element lands at index `len-1`.
+    ArrayPush = 0x67,
+    /// `ArrayPop` — `arr -> val`: remove and push the last element of
+    /// `arr` in place (reference semantics), shrinking the array by one.
+    /// Popping an empty array traps with `V0019 POP_EMPTY_ARRAY`.
+    ArrayPop = 0x68,
+    /// `ArrayInsert` — `arr idx val -> arr`: insert `val` at position `idx`
+    /// in place (reference semantics), shifting elements at `idx..` right by
+    /// one and growing the array by one, then push the same array handle
+    /// back. Valid `idx` is `0..=len` (inserting at `len` appends, matching
+    /// `ArrayPush`). An `idx > len` traps with `V0017 INDEX_OUT_OF_BOUNDS`.
+    ArrayInsert = 0x69,
+    /// `ArrayRemove` — `arr idx -> val`: remove the element at position
+    /// `idx` in place (reference semantics), shifting elements at `idx+1..`
+    /// left by one and shrinking the array by one, then push the removed
+    /// value. Valid `idx` is `0..len`; an `idx >= len` (including any index
+    /// into an empty array) traps with `V0017 INDEX_OUT_OF_BOUNDS`.
+    ArrayRemove = 0x6A,
 
     // === Control flow =======================================================
     /// `Jump i32` — unconditional relative jump.
@@ -216,6 +236,10 @@ impl Opcode {
             0x64 => Self::MakeAggregate,
             0x65 => Self::GetField,
             0x66 => Self::GetTag,
+            0x67 => Self::ArrayPush,
+            0x68 => Self::ArrayPop,
+            0x69 => Self::ArrayInsert,
+            0x6A => Self::ArrayRemove,
             0x70 => Self::Jump,
             0x71 => Self::JumpIfFalse,
             0x80 => Self::Call,
@@ -285,6 +309,10 @@ impl Opcode {
             Self::MakeAggregate => "make_aggregate",
             Self::GetField => "get_field",
             Self::GetTag => "get_tag",
+            Self::ArrayPush => "array_push",
+            Self::ArrayPop => "array_pop",
+            Self::ArrayInsert => "array_insert",
+            Self::ArrayRemove => "array_remove",
             Self::Jump => "jump",
             Self::JumpIfFalse => "jump_if_false",
             Self::Call => "call",
@@ -335,6 +363,10 @@ mod tests {
             Opcode::MakeAggregate,
             Opcode::GetField,
             Opcode::GetTag,
+            Opcode::ArrayPush,
+            Opcode::ArrayPop,
+            Opcode::ArrayInsert,
+            Opcode::ArrayRemove,
             Opcode::Jump,
             Opcode::JumpIfFalse,
             Opcode::Call,
@@ -404,6 +436,10 @@ mod tests {
             Opcode::MakeAggregate,
             Opcode::GetField,
             Opcode::GetTag,
+            Opcode::ArrayPush,
+            Opcode::ArrayPop,
+            Opcode::ArrayInsert,
+            Opcode::ArrayRemove,
             Opcode::Jump,
             Opcode::JumpIfFalse,
             Opcode::Call,

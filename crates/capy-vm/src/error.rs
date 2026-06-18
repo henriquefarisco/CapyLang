@@ -62,6 +62,10 @@ pub const V_INDEX_OUT_OF_BOUNDS: &str = "V0017";
 /// `0..len` range. Bounds-checked and fail-closed. Kept distinct from
 /// the array-specific `V0017` so messages stay precise.
 pub const V_FIELD_OUT_OF_BOUNDS: &str = "V0018";
+/// `ArrayPop` was executed on an empty array (length 0). Fail-closed:
+/// there is no last element to remove. Kept distinct from `V0017`
+/// (an in-range/out-of-range *index*) so the message stays precise.
+pub const V_POP_EMPTY_ARRAY: &str = "V0019";
 
 /// Errors that the VM produces during loading or execution. All
 /// variants are fail-closed: the VM never panics on malformed bytecode
@@ -149,6 +153,9 @@ pub enum VmError {
         index: u32,
         len: usize,
     },
+    PopEmptyArray {
+        pc: u32,
+    },
 }
 
 impl VmError {
@@ -174,6 +181,7 @@ impl VmError {
             Self::HostCallFailed { .. } => V_HOST_CALL_FAILED,
             Self::IndexOutOfBounds { .. } => V_INDEX_OUT_OF_BOUNDS,
             Self::FieldOutOfBounds { .. } => V_FIELD_OUT_OF_BOUNDS,
+            Self::PopEmptyArray { .. } => V_POP_EMPTY_ARRAY,
         }
     }
 
@@ -203,7 +211,8 @@ impl VmError {
             | Self::UnresolvedHostImport { pc, .. }
             | Self::HostCallFailed { pc, .. }
             | Self::IndexOutOfBounds { pc, .. }
-            | Self::FieldOutOfBounds { pc, .. } => Some(*pc),
+            | Self::FieldOutOfBounds { pc, .. }
+            | Self::PopEmptyArray { pc } => Some(*pc),
             Self::BudgetExhausted { .. }
             | Self::UnknownFunction { .. }
             | Self::MalformedModule { .. } => None,
@@ -333,6 +342,9 @@ impl fmt::Display for VmError {
                 f,
                 "[{code}] field index {index} out of bounds (len={len}) at pc=0x{pc:04x}"
             ),
+            Self::PopEmptyArray { pc } => {
+                write!(f, "[{code}] pop from empty array at pc=0x{pc:04x}")
+            }
         }
     }
 }
@@ -510,6 +522,7 @@ mod tests {
                 },
                 V_FIELD_OUT_OF_BOUNDS,
             ),
+            (VmError::PopEmptyArray { pc: 0 }, V_POP_EMPTY_ARRAY),
         ];
         for (err, code) in samples {
             let s = format!("{err}");

@@ -1,6 +1,6 @@
 # CapyLang
 
-Version: 0.1.8
+Version: 0.1.9
 
 CapyLang is the external language-core repository for CapyOS.
 
@@ -106,9 +106,10 @@ instruction set, with wrapping i64 arithmetic, IEEE-754 floats,
 strict same-type binary ops (with `Int ↔ Float` promotion across
 the numeric category), strict `Bool` for `JumpIfFalse`/`Not`, a
 per-call instruction budget (default `1_000_000`) and a fail-closed
-error catalogue `V0001`-`V0018` (S5b.3 added `V0011`-`V0013` for
+error catalogue `V0001`-`V0019` (S5b.3 added `V0011`-`V0013` for
 calls; S7 added `V0014`-`V0016` for host calls; S6.2 added `V0017`
-`INDEX_OUT_OF_BOUNDS`; S6.3a added `V0018` `FIELD_OUT_OF_BOUNDS`). No
+`INDEX_OUT_OF_BOUNDS`; S6.3a added `V0018` `FIELD_OUT_OF_BOUNDS`;
+S6.2b added `V0019` `POP_EMPTY_ARRAY`). No
 JIT, no syscalls, no host pointers, no global state.
 
 Slice **S5c (static stack-balance verifier)** runs at VM load time
@@ -184,6 +185,29 @@ opcodes (`make_array` 0x60, `array_get` 0x61, `array_set` 0x62,
 access is bounds-checked and a bad index traps with `V0017
 INDEX_OUT_OF_BOUNDS`. This unblocks variable-length data such as a grid
 or the snake body.
+
+Slice **S6.2b (growable arrays)** makes those arrays *resizable* with two
+additive opcodes (`array_push` 0x67, `array_pop` 0x68) in the reserved
+aggregate block. `array_push` appends a value to a bound array in place
+(reference semantics, growing it by one) and pushes the same handle back;
+`array_pop` removes and returns the last element. A push/pop on a
+non-array traps with `V0005 TYPE_MISMATCH`, and popping an empty array
+traps fail-closed with the new `V0019 POP_EMPTY_ARRAY`. This is bytecode +
+VM only (testable by building modules directly); the `a.push(x)` /
+`a.pop()` frontend surface follows with the method-call/stdlib work. It
+completes the variable-length building block the snake body needs.
+
+Slice **S6.2c (array insert / remove)** rounds out the growable surface
+with two positional opcodes (`array_insert` 0x69, `array_remove` 0x6A) in
+the same reserved aggregate block. `array_insert` pops `(arr, idx, val)`,
+inserts `val` at `idx` in place (shifting later elements right, growing by
+one; `idx == len` appends exactly like `array_push`) and pushes the same
+handle back; `array_remove` pops `(arr, idx)`, removes the element at `idx`
+(shifting later elements left, shrinking by one) and pushes it. Both reuse
+the index trap `V0017 INDEX_OUT_OF_BOUNDS` for a negative or out-of-range
+index (no new trap) and `V0005 TYPE_MISMATCH` on a non-array operand. Like
+S6.2b this is bytecode + VM only; the `a.insert(i, x)` / `a.remove(i)`
+frontend surface follows with the method-call/stdlib work.
 
 Slice **S6.3a (tagged aggregates)** adds the runtime value model for
 `struct` / `enum`: `Value::Aggregate { tag, fields }` (same
@@ -280,7 +304,7 @@ crates/
       functions.rs        # FunctionTable / Function (name, locals, opaque code)
       imports.rs          # ImportTable / Import (module::symbol)
       debug.rs            # DebugInfo / DebugEntry (bytecode -> source span)
-      opcode.rs           # Opcode enum (39 frozen byte values) + Imm shape
+      opcode.rs           # Opcode enum (43 frozen byte values) + Imm shape
       instruction.rs      # Instruction enum + encode/decode/disassemble_text
       cursor.rs           # private bounds-checked byte cursor
       error.rs            # BytecodeError + B0001..B0012 codes
@@ -299,7 +323,7 @@ crates/
       lib.rs              # public API re-exports
       value.rs            # Value (None/Bool/Int/Float/Str/Array/Aggregate)
       execute.rs          # Vm loader + interpreter loop
-      error.rs            # VmError + V0001..V0018 codes
+      error.rs            # VmError + V0001..V0019 codes
     tests/
       end_to_end.rs       # source -> AST -> bytecode -> Value integration tests
   capy-diagnostics/       # S3 - Severity, Code, Label, Diagnostic, SourceMap, render, bridges

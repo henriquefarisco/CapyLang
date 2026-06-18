@@ -10,6 +10,98 @@ Slice identifiers (e.g. **S1**, **S2**) refer to the roadmap captured in
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-06-17
+
+### Added
+
+- **S10 (first slice) — array methods at source level (`a.push(x)`,
+  `a.pop()`, `a.insert(i, x)`, `a.remove(i)`, `a.get(i)`, `a.set(i, x)`,
+  `a.len()`).** Makes the growable-array opcodes usable from CapyLang source
+  for the first time. The emitter lowers a method-call whose callee is a field
+  access (`recv.method(args)`) onto the matching array opcode, emitting the
+  receiver then the arguments in source order (so `a.set(i, v)` →
+  `arr idx val` + `ArraySet`). **Emitter-only — no new opcodes or wire
+  change**: it reuses the existing `0x60-0x6A` array opcodes, and the parser
+  already produced `Call { callee: Field { .. }, .. }` for the postfix
+  `.name(...)` form, so only `emit_call` grew an array-method arm. An unknown
+  method is fail-closed (`E0012 UNSUPPORTED_FEATURE`); a wrong argument count
+  for a known method is the new `E0022 METHOD_ARITY`. Five end-to-end tests
+  cover `push`/`len`/`insert` lowering plus the two fail-closed paths. This
+  closes the "the `a.push(x)` / `a.pop()` frontend surface waits on S10" note
+  the S6.2b/S6.2c slices left open (array reads/writes via `a[i]` / `a[i] = v`
+  index syntax were already lowered by S6.2).
+- **S6.2c — array insert / remove (`array_insert` / `array_remove`,
+  bytecode + VM).** Completes the growable-array surface S6.2b started by
+  adding positional insert / remove, so a bound array can grow or shrink at
+  an arbitrary index instead of only at the tail (the snake body can splice,
+  not just append). Two additive opcodes in the reserved `0x60-0x6F`
+  aggregate block: `array_insert` (0x69, no immediate) pops `(arr, idx, val)`,
+  inserts `val` at `idx` in the shared backing **in place** (shifting `idx..`
+  right, growing by one) and pushes the same array handle back (reference
+  semantics, mirroring `array_set`); `array_remove` (0x6A, no immediate) pops
+  `(arr, idx)`, removes and pushes the element at `idx` (shifting `idx+1..`
+  left, shrinking by one). An `idx == len` insert appends (matching
+  `array_push`); a negative index, `idx > len` (insert) or `idx >= len`
+  (remove, including any index into an empty array) is fail-closed with the
+  existing `V0017 INDEX_OUT_OF_BOUNDS` — **no new trap** and no wire change
+  beyond the two opcode bytes. Bytecode + VM only (like S6.2b); the
+  `a.insert(i, x)` / `a.remove(i)` frontend surface waits on the method-call
+  / stdlib work (S10).
+  - **Surface**: `Opcode::{ArrayInsert,ArrayRemove}` (0x69 / 0x6A) and the
+    matching no-immediate `Instruction` variants; the verifier stack effects
+    (`ArrayInsert` requires 3 / produces 1, `ArrayRemove` requires 2 /
+    produces 1); the VM `array_insert` / `array_remove` helpers reusing the
+    `expect_array` / `expect_index` primitives and the `IndexOutOfBounds`
+    trap. `docs/bytecode-v0.md`, `docs/compatibility.md`, `docs/aggregates.md`,
+    `docs/roadmap.md` and `README.md` updated (frozen opcode count 41 → 43;
+    no error-catalogue change — `V0017` reused).
+  - **Tests**: opcode round-trip + uniqueness arrays extended; the
+    instruction codec round-trip covers both new variants; three verifier
+    stack-effect tests (balanced insert-then-remove, `array_insert`
+    underflow, `array_remove` underflow); seven VM tests (insert places +
+    shifts, insert at `len` appends like push, insert past `len` traps
+    `V0017`, remove returns the removed element, remove shifts survivors
+    through an alias proving reference semantics, remove out-of-range traps
+    `V0017`, and a `V0005` insert-on-non-array trap).
+  - **Decoupling preserved**: additive opcode growth within v0; the 32-byte
+    header, section tags and existing opcodes are untouched, and determinism
+    / fail-closed contracts hold.
+- **S6.2b — growable arrays (`array_push` / `array_pop`, bytecode + VM).**
+  Extends the S6.2 array machinery so a bound array can change length,
+  closing the gap between "fixed-capacity array" and the variable-length
+  data (the snake body) S6.2 was meant to unblock. Two additive opcodes in
+  the reserved `0x60-0x6F` aggregate block: `array_push` (0x67, no
+  immediate) pops `(arr, val)`, appends `val` to the shared backing **in
+  place** and pushes the same array handle back (reference semantics,
+  mirroring `array_set`); `array_pop` (0x68, no immediate) pops `arr` and
+  pushes its removed last element. A push / pop on a non-array still traps
+  with `V0005 TYPE_MISMATCH`; the new `V0019 POP_EMPTY_ARRAY` trap covers a
+  fail-closed pop of an empty array (kept distinct from the index-oriented
+  `V0017` so the message stays precise). This sub-slice is **bytecode + VM
+  only** — testable by building modules directly, with no frontend changes;
+  the `a.push(x)` / `a.pop()` surface waits on the method-call / stdlib
+  work (S10).
+  - **Surface**: `Opcode::{ArrayPush,ArrayPop}` (0x67 / 0x68) and the
+    matching no-immediate `Instruction` variants; the verifier stack
+    effects (`ArrayPush` requires 2 / produces 1, `ArrayPop` requires 1 /
+    produces 1); `VmError::PopEmptyArray` + the `V_POP_EMPTY_ARRAY`
+    constant (re-exported from the `capy-vm` crate root); the VM
+    `array_push` / `array_pop` helpers. `docs/bytecode-v0.md`,
+    `docs/compatibility.md`, `docs/aggregates.md`, `docs/roadmap.md` and
+    `README.md` updated (frozen opcode count 39 → 41; error catalogue
+    `V0001`-`V0018` → `V0019`).
+  - **Tests**: opcode round-trip + uniqueness arrays extended; the
+    instruction codec round-trip covers both new variants; three verifier
+    stack-effect tests (balanced push-then-pop, `array_push` underflow,
+    `array_pop` underflow); five VM tests (push grows + `array_len`
+    reports the new size, `array_pop` returns/removes the last element,
+    push visible through an alias proving reference semantics, the `V0019`
+    empty-pop trap, and a `V0005` push-on-non-array trap); the VM error
+    catalogue's every-variant display test extended.
+  - **Decoupling preserved**: additive opcode growth within v0; the
+    32-byte header, section tags and existing opcodes are untouched, and
+    determinism / fail-closed contracts hold.
+
 ## [0.1.8] - 2026-06-02
 
 ### Added

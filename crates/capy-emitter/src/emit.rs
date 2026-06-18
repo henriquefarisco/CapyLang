@@ -1285,6 +1285,15 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        // Array methods (S10 frontend): a field-access callee whose name is a
+        // built-in array method lowers onto the array opcodes, making the
+        // growable-array surface usable from source (`a.push(x)`, `a.pop()`,
+        // `a.insert(i, x)`, `a.remove(i)`, `a.get(i)`, `a.set(i, x)`,
+        // `a.len()`). It reuses the existing 0x60-0x6A opcodes; no new wire.
+        if let Expr::Field { target, name, .. } = callee {
+            return self.emit_array_method(target, name.name.as_str(), args, span);
+        }
+
         let name = match callee {
             Expr::Ident(id) => &id.name,
             Expr::Path { span, .. } => {
@@ -1334,6 +1343,58 @@ impl<'a> FunctionEmitter<'a> {
                 Instruction::HostCall { import_idx, argc }.encode_into(&mut self.code);
             }
         }
+        Ok(())
+    }
+
+    /// Lowers a built-in array method call `recv.method(args)` onto the
+    /// array opcodes (S10 array surface). The receiver is emitted first,
+    /// then the arguments in source order, matching each opcode's operand
+    /// order (e.g. `a.set(i, v)` -> `arr idx val` then `ArraySet`). The
+    /// method name selects the opcode and its required argument count;
+    /// an unknown method or an arity mismatch is a fail-closed error.
+    fn emit_array_method(
+        &mut self,
+        recv: &Expr,
+        method: &str,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<(), EmitError> {
+        let resolved: Option<(Opcode, usize, &'static str)> = match method {
+            "push" => Some((Opcode::ArrayPush, 1, "push")),
+            "pop" => Some((Opcode::ArrayPop, 0, "pop")),
+            "insert" => Some((Opcode::ArrayInsert, 2, "insert")),
+            "remove" => Some((Opcode::ArrayRemove, 1, "remove")),
+            "get" => Some((Opcode::ArrayGet, 1, "get")),
+            "set" => Some((Opcode::ArraySet, 2, "set")),
+            "len" => Some((Opcode::ArrayLen, 0, "len")),
+            _ => None,
+        };
+        let (op, want, method_lit) = match resolved {
+            Some(t) => t,
+            None => {
+                return Err(EmitError::new(
+                    EmitErrorKind::UnsupportedFeature {
+                        what: "method call (only array push/pop/insert/remove/get/set/len)",
+                    },
+                    span,
+                ));
+            }
+        };
+        if args.len() != want {
+            return Err(EmitError::new(
+                EmitErrorKind::MethodArity {
+                    method: method_lit,
+                    want,
+                    got: args.len(),
+                },
+                span,
+            ));
+        }
+        self.emit_expr(recv)?;
+        for a in args {
+            self.emit_expr(a)?;
+        }
+        self.emit_op(op);
         Ok(())
     }
 

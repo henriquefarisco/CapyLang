@@ -39,6 +39,10 @@
 //! | `Neg`                                           |        1 |     0 |
 //! | `Eq` `Ne` `Lt` `Le` `Gt` `Ge`                   |        2 |    -1 |
 //! | `Not`                                           |        1 |     0 |
+//! | `ArrayPush`                                     |        2 |    -1 |
+//! | `ArrayPop`                                      |        1 |     0 |
+//! | `ArrayInsert`                                   |        3 |    -2 |
+//! | `ArrayRemove`                                   |        2 |    -1 |
 //! | `Jump`                                          |        0 |     0 |
 //! | `JumpIfFalse`                                   |        1 |    -1 |
 //! | `Call(fn_idx, argc)`                            |    `argc`| `1 - argc` |
@@ -332,6 +336,7 @@ fn required_inputs(ins: Instruction) -> u32 {
         | Instruction::Not
         | Instruction::BitNot
         | Instruction::ArrayLen
+        | Instruction::ArrayPop
         | Instruction::GetField(_)
         | Instruction::GetTag
         | Instruction::JumpIfFalse(_)
@@ -352,8 +357,10 @@ fn required_inputs(ins: Instruction) -> u32 {
         | Instruction::Le
         | Instruction::Gt
         | Instruction::Ge
-        | Instruction::ArrayGet => 2,
-        Instruction::ArraySet => 3,
+        | Instruction::ArrayGet
+        | Instruction::ArrayPush
+        | Instruction::ArrayRemove => 2,
+        Instruction::ArraySet | Instruction::ArrayInsert => 3,
         Instruction::MakeArray(n) => n,
         Instruction::MakeAggregate { field_count, .. } => field_count,
         Instruction::Call { argc, .. } | Instruction::HostCall { argc, .. } => argc,
@@ -396,6 +403,10 @@ fn produced_outputs(ins: Instruction) -> u32 {
         | Instruction::ArrayGet
         | Instruction::ArraySet
         | Instruction::ArrayLen
+        | Instruction::ArrayPush
+        | Instruction::ArrayPop
+        | Instruction::ArrayInsert
+        | Instruction::ArrayRemove
         | Instruction::MakeAggregate { .. }
         | Instruction::GetField(_)
         | Instruction::GetTag
@@ -703,6 +714,119 @@ mod tests {
                 tag: 0,
                 field_count: 2,
             },
+            Instruction::Return,
+        ];
+        match verify(&ins, 0, &[]).unwrap_err() {
+            VerifyError::StackUnderflow {
+                required, depth, ..
+            } => {
+                assert_eq!(required, 2);
+                assert_eq!(depth, 1);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn array_push_then_pop_round_trips_balanced() {
+        // make_array(0); load_const 0; array_push; array_pop; return —
+        // push consumes (arr, val) and yields arr (net -1); pop consumes
+        // arr and yields the popped value (net 0), so the function ends
+        // with exactly one value on the stack.
+        let ins = vec![
+            Instruction::MakeArray(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayPush,
+            Instruction::ArrayPop,
+            Instruction::Return,
+        ];
+        // Peak depth is 2 (the array plus the value before array_push).
+        assert_eq!(verify(&ins, 0, &[]).unwrap(), 2);
+    }
+
+    #[test]
+    fn array_push_underflow_when_value_missing_traps() {
+        // array_push wants 2 operands (arr, val) but only the array is
+        // on the stack.
+        let ins = vec![
+            Instruction::MakeArray(0),
+            Instruction::ArrayPush,
+            Instruction::Return,
+        ];
+        match verify(&ins, 0, &[]).unwrap_err() {
+            VerifyError::StackUnderflow {
+                required, depth, ..
+            } => {
+                assert_eq!(required, 2);
+                assert_eq!(depth, 1);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn array_pop_underflow_on_empty_stack_traps() {
+        // array_pop needs one operand (the array) but the stack is empty.
+        let ins = vec![Instruction::ArrayPop, Instruction::Return];
+        match verify(&ins, 0, &[]).unwrap_err() {
+            VerifyError::StackUnderflow {
+                required, depth, ..
+            } => {
+                assert_eq!(required, 1);
+                assert_eq!(depth, 0);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn array_insert_then_remove_round_trips_balanced() {
+        // make_array(0); load_const 0; load_const 0; array_insert;
+        // load_const 0; array_remove; return — insert consumes (arr, idx,
+        // val) and yields arr (net -2); remove consumes (arr, idx) and
+        // yields the removed value (net -1), so the function ends with
+        // exactly one value on the stack.
+        let ins = vec![
+            Instruction::MakeArray(0),
+            Instruction::LoadConst(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayInsert,
+            Instruction::LoadConst(0),
+            Instruction::ArrayRemove,
+            Instruction::Return,
+        ];
+        // Peak depth is 3 (the array plus idx plus value before array_insert).
+        assert_eq!(verify(&ins, 0, &[]).unwrap(), 3);
+    }
+
+    #[test]
+    fn array_insert_underflow_when_value_missing_traps() {
+        // array_insert wants 3 operands (arr, idx, val) but only the array
+        // and the index are on the stack.
+        let ins = vec![
+            Instruction::MakeArray(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayInsert,
+            Instruction::Return,
+        ];
+        match verify(&ins, 0, &[]).unwrap_err() {
+            VerifyError::StackUnderflow {
+                required, depth, ..
+            } => {
+                assert_eq!(required, 3);
+                assert_eq!(depth, 2);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn array_remove_underflow_when_index_missing_traps() {
+        // array_remove needs two operands (arr, idx) but only the array is
+        // on the stack.
+        let ins = vec![
+            Instruction::MakeArray(0),
+            Instruction::ArrayRemove,
             Instruction::Return,
         ];
         match verify(&ins, 0, &[]).unwrap_err() {

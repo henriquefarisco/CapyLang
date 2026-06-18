@@ -274,6 +274,94 @@ fn continue_outside_loop_is_reported() {
 }
 
 #[test]
+fn array_push_method_lowers_to_array_push_op() {
+    // S10: `a.push(7)` lowers to receiver + arg + ArrayPush. The receiver
+    // (local 0) is emitted first, then the argument, matching the opcode.
+    let parsed = parse_source("fn f(a: i32) { a.push(7) }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_t, consts, ins) = decode_first_fn(&out.module);
+    assert_eq!(consts.entries, vec![Constant::Int(7)]);
+    assert_eq!(
+        ins,
+        vec![
+            Instruction::LoadLocal(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayPush,
+            Instruction::Return,
+        ]
+    );
+}
+
+#[test]
+fn array_len_method_lowers_to_array_len_op() {
+    // A zero-argument method: only the receiver is emitted, then ArrayLen.
+    let parsed = parse_source("fn f(a: i32) { a.len() }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_t, consts, ins) = decode_first_fn(&out.module);
+    assert!(consts.entries.is_empty());
+    assert_eq!(
+        ins,
+        vec![
+            Instruction::LoadLocal(0),
+            Instruction::ArrayLen,
+            Instruction::Return,
+        ]
+    );
+}
+
+#[test]
+fn array_insert_method_lowers_receiver_then_args_in_order() {
+    // A two-argument method: receiver, then idx, then val (source order),
+    // matching ArrayInsert's `arr idx val` operand order.
+    let parsed = parse_source("fn f(a: i32) { a.insert(1, 2) }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_t, consts, ins) = decode_first_fn(&out.module);
+    assert_eq!(consts.entries, vec![Constant::Int(1), Constant::Int(2)]);
+    assert_eq!(
+        ins,
+        vec![
+            Instruction::LoadLocal(0),
+            Instruction::LoadConst(0),
+            Instruction::LoadConst(1),
+            Instruction::ArrayInsert,
+            Instruction::Return,
+        ]
+    );
+}
+
+#[test]
+fn array_method_wrong_arity_is_reported() {
+    // `push` wants exactly one argument; zero is a fail-closed E0022.
+    let parsed = parse_source("fn f(a: i32) { a.push() }\n");
+    let out = emit(&parsed.source);
+    assert_eq!(out.errors.len(), 1);
+    assert_eq!(out.errors[0].code(), "E0022");
+    assert!(matches!(
+        out.errors[0].kind,
+        capy_emitter::EmitErrorKind::MethodArity {
+            want: 1,
+            got: 0,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn unknown_method_is_reported() {
+    // Only the built-in array methods lower; anything else is fail-closed.
+    let parsed = parse_source("fn f(a: i32) { a.frobnicate() }\n");
+    let out = emit(&parsed.source);
+    assert_eq!(out.errors.len(), 1);
+    assert!(matches!(
+        out.errors[0].kind,
+        capy_emitter::EmitErrorKind::UnsupportedFeature { .. }
+    ));
+}
+
+#[test]
 fn break_with_value_inside_loop_compiles() {
     let parsed = parse_source("fn br() { loop { break 7; } }\n");
     let out = emit(&parsed.source);

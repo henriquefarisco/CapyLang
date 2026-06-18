@@ -404,6 +404,32 @@ impl<'a> ExecState<'a> {
                         }
                     }
                 }
+                Instruction::ArrayPush => {
+                    let val = self.pop(pc)?;
+                    let arr = self.pop(pc)?;
+                    array_push(pc, &arr, val, "array_push")?;
+                    // Reference semantics: push the same handle back.
+                    self.stack.push(arr);
+                }
+                Instruction::ArrayPop => {
+                    let arr = self.pop(pc)?;
+                    let elem = array_pop(pc, &arr, "array_pop")?;
+                    self.stack.push(elem);
+                }
+                Instruction::ArrayInsert => {
+                    let val = self.pop(pc)?;
+                    let idx = self.pop(pc)?;
+                    let arr = self.pop(pc)?;
+                    array_insert(pc, &arr, &idx, val, "array_insert")?;
+                    // Reference semantics: push the same handle back.
+                    self.stack.push(arr);
+                }
+                Instruction::ArrayRemove => {
+                    let idx = self.pop(pc)?;
+                    let arr = self.pop(pc)?;
+                    let elem = array_remove(pc, &arr, &idx, "array_remove")?;
+                    self.stack.push(elem);
+                }
                 Instruction::MakeAggregate { tag, field_count } => {
                     let n = field_count as usize;
                     if self.stack.len() < n {
@@ -787,6 +813,64 @@ fn array_store(
     }
     v[i as usize] = val;
     Ok(())
+}
+
+/// Appends `val` to the end of `arr` for `ArrayPush` (reference
+/// semantics). Requires `arr` to be an `Array`; any other operand traps
+/// fail-closed with `TypeMismatch`. Always succeeds for an array,
+/// growing it by one element (the new value lands at index `len-1`).
+fn array_push(pc: u32, arr: &Value, val: Value, op: &'static str) -> Result<(), VmError> {
+    let cell = expect_array(pc, arr, op)?;
+    cell.borrow_mut().push(val);
+    Ok(())
+}
+
+/// Removes and returns the last element of `arr` for `ArrayPop`
+/// (reference semantics). Requires `arr` to be an `Array`; popping an
+/// empty array traps fail-closed with `PopEmptyArray`.
+fn array_pop(pc: u32, arr: &Value, op: &'static str) -> Result<Value, VmError> {
+    let cell = expect_array(pc, arr, op)?;
+    let popped = cell.borrow_mut().pop();
+    popped.ok_or(VmError::PopEmptyArray { pc })
+}
+
+/// Inserts `val` at position `idx` in `arr` for `ArrayInsert` (reference
+/// semantics). Requires `arr` to be an `Array` and `idx` an `Int`; a
+/// negative index or `idx > len` traps fail-closed with `IndexOutOfBounds`.
+/// An `idx == len` appends (matching `ArrayPush`); the array grows by one
+/// and elements at `idx..` shift right.
+fn array_insert(
+    pc: u32,
+    arr: &Value,
+    idx: &Value,
+    val: Value,
+    op: &'static str,
+) -> Result<(), VmError> {
+    let cell = expect_array(pc, arr, op)?;
+    let i = expect_index(pc, idx, op)?;
+    let mut v = cell.borrow_mut();
+    let len = v.len();
+    if i < 0 || (i as u64) > len as u64 {
+        return Err(VmError::IndexOutOfBounds { pc, index: i, len });
+    }
+    v.insert(i as usize, val);
+    Ok(())
+}
+
+/// Removes and returns the element at position `idx` in `arr` for
+/// `ArrayRemove` (reference semantics). Requires `arr` to be an `Array`
+/// and `idx` an `Int`; a negative or out-of-range index (including any
+/// index into an empty array) traps fail-closed with `IndexOutOfBounds`.
+/// The array shrinks by one and elements at `idx+1..` shift left.
+fn array_remove(pc: u32, arr: &Value, idx: &Value, op: &'static str) -> Result<Value, VmError> {
+    let cell = expect_array(pc, arr, op)?;
+    let i = expect_index(pc, idx, op)?;
+    let mut v = cell.borrow_mut();
+    let len = v.len();
+    if i < 0 || (i as u64) >= len as u64 {
+        return Err(VmError::IndexOutOfBounds { pc, index: i, len });
+    }
+    Ok(v.remove(i as usize))
 }
 
 fn expect_array<'a>(
@@ -1181,6 +1265,360 @@ mod tests {
         match Vm::from_module(&bytes).unwrap_err() {
             VmError::MalformedModule { code, .. } => {
                 assert_eq!(code, capy_bytecode::B_VERIFIER_CALL_ARITY_OVERFLOW);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    // --- S6.2b: growable arrays (array_push / array_pop) ------------------
+
+    #[test]
+    fn array_push_grows_array_then_len_reports_new_size() {
+        // make_array(0); push 7; push 8; array_len -> 2.
+        let code = encode(&[
+            Instruction::MakeArray(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayPush,
+            Instruction::LoadConst(1),
+            Instruction::ArrayPush,
+            Instruction::ArrayLen,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(7), Constant::Int(8)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        assert_eq!(vm.run("main").unwrap(), Value::Int(2));
+    }
+
+    #[test]
+    fn array_pop_returns_and_removes_last_element() {
+        // make_array(0); push 7; push 8; pop -> 8 (and arr is now [7]).
+        let code = encode(&[
+            Instruction::MakeArray(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayPush,
+            Instruction::LoadConst(1),
+            Instruction::ArrayPush,
+            Instruction::ArrayPop,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(7), Constant::Int(8)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        assert_eq!(vm.run("main").unwrap(), Value::Int(8));
+    }
+
+    #[test]
+    fn array_push_is_visible_through_an_alias() {
+        // Reference semantics: store the array in a local, push through a
+        // freshly-loaded handle, then read the length back through the
+        // local. The push must be visible (shared backing store).
+        //
+        //   make_array(0); store_local 0;
+        //   load_local 0; load_const 0; array_push; pop;
+        //   load_local 0; array_len; return  -> 1
+        let code = encode(&[
+            Instruction::MakeArray(0),
+            Instruction::StoreLocal(0),
+            Instruction::LoadLocal(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayPush,
+            Instruction::Pop,
+            Instruction::LoadLocal(0),
+            Instruction::ArrayLen,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(5)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 1,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        assert_eq!(vm.run("main").unwrap(), Value::Int(1));
+    }
+
+    #[test]
+    fn array_pop_on_empty_array_traps() {
+        // make_array(0); array_pop; return — popping an empty array is
+        // fail-closed with V0019.
+        let code = encode(&[
+            Instruction::MakeArray(0),
+            Instruction::ArrayPop,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        match vm.run("main").unwrap_err() {
+            VmError::PopEmptyArray { .. } => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn array_push_on_non_array_traps_type_mismatch() {
+        // load_const 1; load_const 2; array_push — the array operand is an
+        // Int, so the push traps with TypeMismatch (op = "array_push").
+        let code = encode(&[
+            Instruction::LoadConst(0),
+            Instruction::LoadConst(1),
+            Instruction::ArrayPush,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(1), Constant::Int(2)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        match vm.run("main").unwrap_err() {
+            VmError::TypeMismatch { op, found, .. } => {
+                assert_eq!(op, "array_push");
+                assert_eq!(found, "int");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn array_insert_places_value_and_shifts_elements() {
+        // [10,20]; insert 99 at idx 1 -> [10,99,20]; array_get(1) -> 99.
+        let code = encode(&[
+            Instruction::MakeArray(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayPush,
+            Instruction::LoadConst(1),
+            Instruction::ArrayPush,
+            Instruction::LoadConst(2),
+            Instruction::LoadConst(3),
+            Instruction::ArrayInsert,
+            Instruction::LoadConst(2),
+            Instruction::ArrayGet,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![
+                Constant::Int(10),
+                Constant::Int(20),
+                Constant::Int(1),
+                Constant::Int(99),
+            ],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        assert_eq!(vm.run("main").unwrap(), Value::Int(99));
+    }
+
+    #[test]
+    fn array_insert_at_len_appends_like_push() {
+        // [10]; insert 20 at idx 1 (== len) -> [10,20]; array_get(1) -> 20.
+        let code = encode(&[
+            Instruction::MakeArray(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayPush,
+            Instruction::LoadConst(1),
+            Instruction::LoadConst(2),
+            Instruction::ArrayInsert,
+            Instruction::LoadConst(1),
+            Instruction::ArrayGet,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(10), Constant::Int(1), Constant::Int(20)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        assert_eq!(vm.run("main").unwrap(), Value::Int(20));
+    }
+
+    #[test]
+    fn array_insert_index_past_len_traps() {
+        // [10] (len 1); insert at idx 2 (> len) is fail-closed with V0017.
+        let code = encode(&[
+            Instruction::MakeArray(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayPush,
+            Instruction::LoadConst(1),
+            Instruction::LoadConst(2),
+            Instruction::ArrayInsert,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(10), Constant::Int(2), Constant::Int(77)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        match vm.run("main").unwrap_err() {
+            VmError::IndexOutOfBounds { index, len, .. } => {
+                assert_eq!(index, 2);
+                assert_eq!(len, 1);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn array_remove_returns_removed_element() {
+        // [10,20,30]; remove idx 1 -> returns 20 (arr becomes [10,30]).
+        let code = encode(&[
+            Instruction::MakeArray(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayPush,
+            Instruction::LoadConst(1),
+            Instruction::ArrayPush,
+            Instruction::LoadConst(2),
+            Instruction::ArrayPush,
+            Instruction::LoadConst(3),
+            Instruction::ArrayRemove,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![
+                Constant::Int(10),
+                Constant::Int(20),
+                Constant::Int(30),
+                Constant::Int(1),
+            ],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        assert_eq!(vm.run("main").unwrap(), Value::Int(20));
+    }
+
+    #[test]
+    fn array_remove_shifts_remaining_through_alias() {
+        // Reference semantics + left shift: build [10,20] through a local,
+        // remove index 0 (returns 10), then read arr[0] back through the
+        // local alias -> 20 (the surviving element shifted into slot 0).
+        //
+        //   make_array(0); store_local 0;
+        //   load_local 0; load_const 0; array_push; pop;   // [10]
+        //   load_local 0; load_const 1; array_push; pop;   // [10,20]
+        //   load_local 0; load_const 2; array_remove; pop; // remove idx 0
+        //   load_local 0; load_const 2; array_get; return  // arr[0] -> 20
+        let code = encode(&[
+            Instruction::MakeArray(0),
+            Instruction::StoreLocal(0),
+            Instruction::LoadLocal(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayPush,
+            Instruction::Pop,
+            Instruction::LoadLocal(0),
+            Instruction::LoadConst(1),
+            Instruction::ArrayPush,
+            Instruction::Pop,
+            Instruction::LoadLocal(0),
+            Instruction::LoadConst(2),
+            Instruction::ArrayRemove,
+            Instruction::Pop,
+            Instruction::LoadLocal(0),
+            Instruction::LoadConst(2),
+            Instruction::ArrayGet,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(10), Constant::Int(20), Constant::Int(0)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 1,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        assert_eq!(vm.run("main").unwrap(), Value::Int(20));
+    }
+
+    #[test]
+    fn array_remove_out_of_range_traps() {
+        // make_array(0); remove idx 0 on an empty array -> V0017 (len 0).
+        let code = encode(&[
+            Instruction::MakeArray(0),
+            Instruction::LoadConst(0),
+            Instruction::ArrayRemove,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(0)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        match vm.run("main").unwrap_err() {
+            VmError::IndexOutOfBounds { index, len, .. } => {
+                assert_eq!(index, 0);
+                assert_eq!(len, 0);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn array_insert_on_non_array_traps_type_mismatch() {
+        // The array operand is an Int, so array_insert traps fail-closed
+        // with TypeMismatch (op = "array_insert").
+        let code = encode(&[
+            Instruction::LoadConst(0),
+            Instruction::LoadConst(1),
+            Instruction::LoadConst(2),
+            Instruction::ArrayInsert,
+            Instruction::Return,
+        ]);
+        let bytes = module_with(
+            vec![Constant::Int(1), Constant::Int(0), Constant::Int(2)],
+            vec![Function {
+                name: "main".into(),
+                locals_count: 0,
+                code,
+            }],
+        );
+        let vm = Vm::from_module(&bytes).unwrap();
+        match vm.run("main").unwrap_err() {
+            VmError::TypeMismatch { op, found, .. } => {
+                assert_eq!(op, "array_insert");
+                assert_eq!(found, "int");
             }
             other => panic!("unexpected: {other:?}"),
         }

@@ -59,6 +59,8 @@ These slices are implemented in the working tree but must pass
 | - | `Str + Str` concatenation in the VM (`Add` opcode, no wire change) |
 | S12 | `capyc` CLI completed: `check` (rustc-style diagnostics) and `repl` |
 | S6.2 | aggregate value model — arrays (`Value::Array`, opcodes 0x60-0x63, `V0017`), literals / indexing / indexed assignment |
+| S6.2b | growable arrays — `array_push` / `array_pop` (opcodes 0x67-0x68, reference semantics, `V0019 POP_EMPTY_ARRAY`); bytecode/VM only, no frontend yet |
+| S6.2c | array insert / remove — `array_insert` / `array_remove` (opcodes 0x69-0x6A, reference semantics, reuses `V0017 INDEX_OUT_OF_BOUNDS`); bytecode/VM only, no frontend yet |
 | S6.3a | tagged-aggregate value model (`Value::Aggregate { tag, fields }`, opcodes `make_aggregate`/`get_field`/`get_tag` 0x64-0x66, `V0018 FIELD_OUT_OF_BOUNDS`) — bytecode/VM only, no frontend yet |
 | S6.3b | enum support in the emitter — variant tag registry, unit/tuple construction (`Path` / `Call` → `MakeAggregate`), `match` `Path` / `TupleStruct` lowering (`GetTag` test + recursive `GetField`); no new opcodes |
 | S6.3c | struct support — `Expr::StructLit` AST + parser (with the `no_struct_literal` head context), struct field-layout registry, literal construction (reordered to declared order), `match` `Struct` pattern lowering; no new opcodes |
@@ -78,6 +80,31 @@ whole sequence converges on the Snake / Asteroids benchmark goal.
   `a[i] = v`. Tuples / structs / enum payloads build on the same
   machinery and are S6.3 (below).
   - Unblocks: variable-length data (the snake body), 2D grids.
+  - Design / detail: `docs/aggregates.md`.
+
+- **S6.2b - growable arrays (VM). Implemented; pending validation.**
+  Extends S6.2 with the two `Vec`-style opcodes `array_push` (0x67) and
+  `array_pop` (0x68) so a bound array can actually change length, plus
+  the `V0019 POP_EMPTY_ARRAY` trap for a fail-closed pop of an empty
+  array. Reference semantics are preserved (push mutates the shared
+  backing and returns the same handle). Bytecode + VM only — the
+  `a.push(x)` / `a.pop()` frontend surface waits on method-call / stdlib
+  work (S10). This is the piece that makes "variable-length data (the
+  snake body)" genuinely expressible rather than fixed-capacity.
+  - Depends on: S6.2.
+  - Design / detail: `docs/aggregates.md`.
+
+- **S6.2c - array insert / remove (VM). Implemented; pending validation.**
+  Completes S6.2b with the two positional `Vec`-style opcodes
+  `array_insert` (0x69) and `array_remove` (0x6A) so a bound array can grow
+  or shrink at an arbitrary index, not only at the tail. An `idx == len`
+  insert appends (matching `array_push`); an out-of-range insert / remove is
+  fail-closed with the existing `V0017 INDEX_OUT_OF_BOUNDS` (no new trap).
+  Reference semantics are preserved (both mutate the shared backing in
+  place; insert returns the same handle). Bytecode + VM only — the
+  `a.insert(i, x)` / `a.remove(i)` frontend surface waits on method-call /
+  stdlib work (S10).
+  - Depends on: S6.2b.
   - Design / detail: `docs/aggregates.md`.
 
 - **S6.3 / S2.2c - struct / enum at runtime + `match` aggregate
@@ -102,9 +129,15 @@ whole sequence converges on the Snake / Asteroids benchmark goal.
   array, reference, generic types). Lower priority for the benchmark
   goal; can land after Phase B if needed.
 
-- **S10 - `capy-stdlib`.** A minimal standard-library subset callable
-  from bytecode (length, min / max, basic numeric / string helpers),
+- **S10 - `capy-stdlib` + array methods.** A minimal standard-library subset
+  callable from bytecode (length, min / max, basic numeric / string helpers),
   built on the aggregate model.
+  - **First slice delivered (0.1.9):** source-level array methods
+    `a.push(x)` / `a.pop()` / `a.insert(i, x)` / `a.remove(i)` / `a.get(i)` /
+    `a.set(i, x)` / `a.len()` lower onto the existing `0x60-0x6A` opcodes
+    (emitter-only, no new wire; new error `E0022 METHOD_ARITY`). This closes
+    the `a.push(x)` frontend gap the S6.2b/S6.2c slices left open.
+  - Remaining: the broader numeric / string stdlib helpers.
   - Depends on: S6.2 (collections).
 
 ### Phase B - host ABI and CapyOS integration

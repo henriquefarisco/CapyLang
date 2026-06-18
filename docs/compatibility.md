@@ -134,12 +134,12 @@ Current ABI surface:
   `pc() -> Option<u32>` so downstream tooling can resolve errors
   through `capy-diagnostics::bridge::from_vm_with_debug`) with
   the frozen catalogue
-  `V0001`-`V0018` (S5b.3 added `V0011` `CALL_STACK_OVERFLOW`,
+  `V0001`-`V0019` (S5b.3 added `V0011` `CALL_STACK_OVERFLOW`,
   `V0012` `UNKNOWN_FUNCTION_INDEX`, `V0013` `CALL_ARITY_MISMATCH`;
   S7 added `V0014` `UNKNOWN_HOST_IMPORT`, `V0015`
   `UNRESOLVED_HOST_IMPORT`, `V0016` `HOST_CALL_FAILED`; S6.2 added
   `V0017` `INDEX_OUT_OF_BOUNDS`; S6.3a added `V0018`
-  `FIELD_OUT_OF_BOUNDS`)
+  `FIELD_OUT_OF_BOUNDS`; S6.2b added `V0019` `POP_EMPTY_ARRAY`)
   (`STACK_UNDERFLOW`, `LOCAL_OUT_OF_BOUNDS`, `CONST_OUT_OF_BOUNDS`,
   `JUMP_OUT_OF_BOUNDS`, `TYPE_MISMATCH`, `DIVISION_BY_ZERO`,
   `BUDGET_EXHAUSTED`, `UNKNOWN_FUNCTION`, `MALFORMED_MODULE`,
@@ -152,15 +152,18 @@ Current ABI surface:
   error returns, no JIT, no syscalls, no host pointers, no global
   state. Per-call `DEFAULT_INSTRUCTION_BUDGET = 1_000_000` with a
   caller-overridable variant for modelling per-frame budgets.
-- AST → bytecode emitter (S5b.1 / S5b.2 / S5b.3 / S7) — `capy-emitter`
+- AST → bytecode emitter (S5b.1 / S5b.2 / S5b.3 / S7 / S10) — `capy-emitter`
   crate publishing `emit(&Source) -> EmitOutput { module, errors }`,
   `EmitError` and `EmitErrorKind` plus the stable error catalogue
-  `E0001`-`E0021` (S5b.2 added `E0014` `BREAK_OUTSIDE_LOOP`,
+  `E0001`-`E0022` (S5b.2 added `E0014` `BREAK_OUTSIDE_LOOP`,
   `E0015` `CONTINUE_OUTSIDE_LOOP`; S5b.3 added `E0016`
   `UNKNOWN_FUNCTION`, `E0017` `UNSUPPORTED_CALLEE`, `E0018`
   `DUPLICATE_FUNCTION`, `E0019` `TOO_MANY_ARGUMENTS`; S7 added
   `E0020` `DUPLICATE_IMPORT`; S2.4 added `E0021`
-  `INVALID_ASSIGN_TARGET`). Lowers the
+  `INVALID_ASSIGN_TARGET`; S10 added `E0022` `METHOD_ARITY`).
+  S10 also lowers source-level array methods (`a.push(x)`, `a.pop()`,
+  `a.insert(i, x)`, `a.remove(i)`, `a.get(i)`, `a.set(i, x)`, `a.len()`)
+  onto the existing `0x60-0x6A` opcodes (no new wire). Lowers the
   v0 subset of the frontend — literals, locals, paren, unary
   `Neg`/`Not`/`BitNot`, arithmetic + comparison + integer
   bitwise/shift binary operators (`&` `|` `^` `<<` `>>`),
@@ -177,13 +180,16 @@ Current ABI surface:
   top-level `Item::Fn` (with parameters registered as the first
   locals) + `Item::Import` forms into a fully self-consistent
   `Module` that round-trips through `Module::parse`.
-- v0 opcode set + instruction codec (S5a / S5b.3 / S7 / S5d / S6.2 / S6.3a) — `Opcode`
-  (39 frozen byte values; `0x82 host_call` added by S7; the integer
+- v0 opcode set + instruction codec (S5a / S5b.3 / S7 / S5d / S6.2 / S6.3a / S6.2b / S6.2c) — `Opcode`
+  (43 frozen byte values; `0x82 host_call` added by S7; the integer
   bitwise/shift opcodes `band`/`bor`/`bxor`/`shl`/`shr` (0x36-0x3A) and
   `bnot` (0x51) added by S5d; the array opcodes
   `make_array`/`array_get`/`array_set`/`array_len` (0x60-0x63) added by
   S6.2; the tagged-aggregate opcodes `make_aggregate`/`get_field`/`get_tag`
-  (0x64-0x66) added by S6.3a),
+  (0x64-0x66) added by S6.3a; the growable-array opcodes
+  `array_push`/`array_pop` (0x67-0x68) added by S6.2b; the positional
+  array opcodes `array_insert`/`array_remove` (0x69-0x6A) added by S6.2c,
+  reusing `V0017`),
   `Imm { None, U32, I32, U32U32 }`,
   `Instruction` enum, `encode` / `decode` / `disassemble_text`.
   Defines the instruction stream inside `Function.code`. Stack
@@ -194,7 +200,9 @@ Current ABI surface:
   `BitXor`, `Shl`, `Shr`, `BitNot`), comparison
   (`Eq`, `Ne`, `Lt`, `Le`, `Gt`, `Ge`),
   logical (`Not`), arrays (`MakeArray U32`, `ArrayGet`, `ArraySet`,
-  `ArrayLen`), tagged aggregates (`MakeAggregate U32U32`, `GetField U32`,
+  `ArrayLen`, `ArrayPush`, `ArrayPop`, `ArrayInsert`, `ArrayRemove`),
+  tagged aggregates
+  (`MakeAggregate U32U32`, `GetField U32`,
   `GetTag`), control flow (`Jump I32`, `JumpIfFalse I32`
   — both PC-relative to the byte after the immediate),
   function call (`Call U32U32` — `(fn_idx, argc)`), `Return` and
