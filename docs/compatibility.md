@@ -165,7 +165,9 @@ Current ABI surface:
   `a.insert(i, x)`, `a.remove(i)`, `a.get(i)`, `a.set(i, x)`, `a.len()`)
   onto the existing `0x60-0x6A` opcodes (no new wire), plus integer
   `min(a, b)` / `max(a, b)` builtins lowered to compare + conditional-jump
-  (also no new wire; a user-defined `min` / `max` shadows the builtin).
+  (also no new wire; a user-defined `min` / `max` shadows the builtin),
+  plus `clamp(x, lo, hi)` = `max(lo, min(x, hi))` lowered to two such selects
+  (no new opcode/const-pool; a user-defined `clamp` shadows it).
   Lowers the v0 subset of the frontend — literals, locals, paren, unary
   `Neg`/`Not`/`BitNot`, arithmetic + comparison + integer
   bitwise/shift binary operators (`&` `|` `^` `<<` `>>`),

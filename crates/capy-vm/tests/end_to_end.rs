@@ -255,6 +255,41 @@ fn min_max_builtins_compute_at_runtime() {
 }
 
 #[test]
+fn clamp_builtin_computes_at_runtime() {
+    // clamp(x, lo, hi) returns lo when x < lo, hi when x > hi, x in between.
+    assert_eq!(
+        run_source("fn main() { clamp(5, 0, 10) }\n").unwrap(),
+        Value::Int(5)
+    );
+    assert_eq!(
+        run_source("fn main() { clamp(-3, 0, 10) }\n").unwrap(),
+        Value::Int(0)
+    );
+    assert_eq!(
+        run_source("fn main() { clamp(15, 0, 10) }\n").unwrap(),
+        Value::Int(10)
+    );
+    // Boundaries and a degenerate lo == hi window.
+    assert_eq!(
+        run_source("fn main() { clamp(0, 0, 10) }\n").unwrap(),
+        Value::Int(0)
+    );
+    assert_eq!(
+        run_source("fn main() { clamp(10, 0, 10) }\n").unwrap(),
+        Value::Int(10)
+    );
+    assert_eq!(
+        run_source("fn main() { clamp(7, 4, 4) }\n").unwrap(),
+        Value::Int(4)
+    );
+    // Composes with the other numeric builtins: max(2, 8) = 8, clamped to 5.
+    assert_eq!(
+        run_source("fn main() { clamp(max(2, 8), 0, 5) }\n").unwrap(),
+        Value::Int(5)
+    );
+}
+
+#[test]
 fn explicit_return_short_circuits() {
     assert_eq!(
         run_source("fn main() { return 7; }\n").unwrap(),

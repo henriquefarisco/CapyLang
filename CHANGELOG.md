@@ -10,6 +10,14 @@ Slice identifiers (e.g. **S1**, **S2**) refer to the roadmap captured in
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-06-21
+
+### Added
+- S10: integer `clamp(x, lo, hi)` numeric builtin = `max(lo, min(x, hi))`.
+  Emitter-only lowering onto two compare + conditional-jump selects (no new
+  opcode, no const-pool), composing the `min`/`max` lowering; a user-defined
+  `fn clamp` still shadows the builtin, and wrong arity reports `E0022`.
+
 ## [0.1.10] - 2026-06-18
 
 ### Added

@@ -440,6 +440,83 @@ fn user_fn_min_takes_precedence_over_builtin() {
 }
 
 #[test]
+fn clamp_builtin_lowers_to_two_compare_selects() {
+    // clamp(x, lo, hi) = max(lo, min(x, hi)): two compare-and-branch selects,
+    // no const-pool. Params x=local0, lo=local1, hi=local2; the temporaries
+    // are locals 3..=6 (the three arg copies + the inner min result).
+    let parsed = parse_source("fn f(x: i32, lo: i32, hi: i32) { clamp(x, lo, hi) }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_t, consts, ins) = decode_first_fn(&out.module);
+    // The lowering only compares the arguments to each other: no literals.
+    assert!(consts.entries.is_empty(), "consts: {:?}", consts.entries);
+    // Each of the three arguments is stored into a temporary first.
+    assert_eq!(ins[0], Instruction::LoadLocal(0));
+    assert_eq!(ins[1], Instruction::StoreLocal(3));
+    assert_eq!(ins[2], Instruction::LoadLocal(1));
+    assert_eq!(ins[3], Instruction::StoreLocal(4));
+    assert_eq!(ins[4], Instruction::LoadLocal(2));
+    assert_eq!(ins[5], Instruction::StoreLocal(5));
+    // Two compare-selects (min then max): exactly two Le and two
+    // JumpIfFalse/Jump pairs, with the inner result stored once.
+    assert_eq!(
+        ins.iter().filter(|i| matches!(i, Instruction::Le)).count(),
+        2
+    );
+    assert_eq!(
+        ins.iter()
+            .filter(|i| matches!(i, Instruction::JumpIfFalse(_)))
+            .count(),
+        2
+    );
+    assert_eq!(
+        ins.iter()
+            .filter(|i| matches!(i, Instruction::Jump(_)))
+            .count(),
+        2
+    );
+    assert!(ins.iter().any(|i| matches!(i, Instruction::StoreLocal(6))));
+}
+
+#[test]
+fn clamp_builtin_wrong_arity_is_reported() {
+    // clamp wants exactly three arguments; two is E0022.
+    let parsed = parse_source("fn f(a: i32, b: i32) { clamp(a, b) }\n");
+    let out = emit(&parsed.source);
+    assert_eq!(out.errors.len(), 1);
+    assert_eq!(out.errors[0].code(), "E0022");
+    assert!(matches!(
+        out.errors[0].kind,
+        capy_emitter::EmitErrorKind::MethodArity {
+            want: 3,
+            got: 2,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn user_fn_clamp_takes_precedence_over_builtin() {
+    // A user-declared `fn clamp` resolves as an ordinary call (here one arg),
+    // shadowing the three-argument numeric built-in, so no compare/select.
+    let parsed = parse_source("fn clamp(x: i32) -> i32 { x }\nfn g() { clamp(9) }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let functions_section = out
+        .module
+        .sections
+        .iter()
+        .find(|s| s.tag == SectionTag::Functions)
+        .expect("functions section");
+    let functions = FunctionTable::decode(&functions_section.payload).expect("decode");
+    let g = decode(&functions.entries[1].code).expect("decode g");
+    assert!(g
+        .iter()
+        .any(|i| matches!(i, Instruction::Call { argc: 1, .. })));
+    assert!(!g.iter().any(|i| matches!(i, Instruction::Le)));
+}
+
+#[test]
 fn break_with_value_inside_loop_compiles() {
     let parsed = parse_source("fn br() { loop { break 7; } }\n");
     let out = emit(&parsed.source);

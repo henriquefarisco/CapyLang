@@ -1319,6 +1319,10 @@ impl<'a> FunctionEmitter<'a> {
             // S10 numeric built-ins, only when the name resolves to no user
             // `fn`/`import` (so a user-declared `fn min` keeps precedence).
             return self.emit_minmax_builtin(name, args, span);
+        } else if name == "clamp" {
+            // S10 numeric built-in `clamp(x, lo, hi)` = `max(lo, min(x, hi))`;
+            // a user-declared `fn clamp` keeps precedence (checked above).
+            return self.emit_clamp_builtin(args, span);
         } else {
             return Err(EmitError::new(
                 EmitErrorKind::UnknownFunction { name: name.clone() },
@@ -1398,6 +1402,76 @@ impl<'a> FunctionEmitter<'a> {
         self.emit_op(Opcode::LoadLocal);
         self.emit_u32(if is_min { rhs_slot } else { lhs_slot });
         self.mark_label(end_label);
+        Ok(())
+    }
+
+    /// Lowers the integer built-in `clamp(x, lo, hi)` = `max(lo, min(x, hi))`
+    /// onto two compare-and-branch selects (S10 numeric helpers; no new
+    /// opcode, no const-pool). Each argument is evaluated once into a
+    /// temporary; the inner `min(x, hi)` result is stored and then fed to the
+    /// outer `max(lo, .)`, so the verifier's stack discipline holds exactly as
+    /// for `min`/`max`. With `lo <= hi` this returns `lo` when `x < lo`, `hi`
+    /// when `x > hi`, and `x` otherwise.
+    fn emit_clamp_builtin(&mut self, args: &[Expr], span: Span) -> Result<(), EmitError> {
+        if args.len() != 3 {
+            return Err(EmitError::new(
+                EmitErrorKind::MethodArity {
+                    method: "clamp",
+                    want: 3,
+                    got: args.len(),
+                },
+                span,
+            ));
+        }
+        let x_slot = self.alloc_unnamed_local();
+        let lo_slot = self.alloc_unnamed_local();
+        let hi_slot = self.alloc_unnamed_local();
+        self.emit_expr(&args[0])?;
+        self.emit_op(Opcode::StoreLocal);
+        self.emit_u32(x_slot);
+        self.emit_expr(&args[1])?;
+        self.emit_op(Opcode::StoreLocal);
+        self.emit_u32(lo_slot);
+        self.emit_expr(&args[2])?;
+        self.emit_op(Opcode::StoreLocal);
+        self.emit_u32(hi_slot);
+
+        // inner = min(x, hi): on `x <= hi` select x, else hi.
+        let inner_slot = self.alloc_unnamed_local();
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(x_slot);
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(hi_slot);
+        self.emit_op(Opcode::Le);
+        let min_else = self.new_label();
+        let min_end = self.new_label();
+        self.emit_jump(Opcode::JumpIfFalse, min_else, span);
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(x_slot);
+        self.emit_jump(Opcode::Jump, min_end, span);
+        self.mark_label(min_else);
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(hi_slot);
+        self.mark_label(min_end);
+        self.emit_op(Opcode::StoreLocal);
+        self.emit_u32(inner_slot);
+
+        // result = max(lo, inner): on `lo <= inner` select inner, else lo.
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(lo_slot);
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(inner_slot);
+        self.emit_op(Opcode::Le);
+        let max_else = self.new_label();
+        let max_end = self.new_label();
+        self.emit_jump(Opcode::JumpIfFalse, max_else, span);
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(inner_slot);
+        self.emit_jump(Opcode::Jump, max_end, span);
+        self.mark_label(max_else);
+        self.emit_op(Opcode::LoadLocal);
+        self.emit_u32(lo_slot);
+        self.mark_label(max_end);
         Ok(())
     }
 

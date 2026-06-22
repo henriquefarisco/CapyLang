@@ -137,10 +137,14 @@ whole sequence converges on the Snake / Asteroids benchmark goal.
     `a.set(i, x)` / `a.len()` lower onto the existing `0x60-0x6A` opcodes
     (emitter-only, no new wire; new error `E0022 METHOD_ARITY`). This closes
     the `a.push(x)` frontend gap the S6.2b/S6.2c slices left open.
-  - **Second slice delivered (Unreleased):** integer `min(a, b)` / `max(a, b)`
+  - **Second slice delivered (0.1.10):** integer `min(a, b)` / `max(a, b)`
     numeric builtins lower to compare + conditional-jump (emitter-only, no new
     wire, no const-pool); user-defined `min` / `max` shadow the builtins, and
     wrong arity reuses `E0022`.
+  - **Third slice delivered (Unreleased):** integer `clamp(x, lo, hi)` =
+    `max(lo, min(x, hi))` lowers to two compare-and-branch selects (emitter-only,
+    no new opcode, no const-pool); a user-defined `clamp` shadows it and wrong
+    arity reuses `E0022`.
   - Remaining: the broader string stdlib helpers and non-integer numerics.
   - Depends on: S6.2 (collections).
 
