@@ -167,7 +167,9 @@ Current ABI surface:
   `min(a, b)` / `max(a, b)` builtins lowered to compare + conditional-jump
   (also no new wire; a user-defined `min` / `max` shadows the builtin),
   plus `clamp(x, lo, hi)` = `max(lo, min(x, hi))` lowered to two such selects
-  (no new opcode/const-pool; a user-defined `clamp` shadows it).
+  (no new opcode/const-pool; a user-defined `clamp` shadows it), and the
+  single-arg `abs(x)` / `sign(x)` lowered to compare-and-branch selects
+  against the literal `0` (`abs` via `Neg`; `sign` yields `-1`/`0`/`1`).
   Lowers the v0 subset of the frontend — literals, locals, paren, unary
   `Neg`/`Not`/`BitNot`, arithmetic + comparison + integer
   bitwise/shift binary operators (`&` `|` `^` `<<` `>>`),

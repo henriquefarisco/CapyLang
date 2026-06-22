@@ -517,6 +517,83 @@ fn user_fn_clamp_takes_precedence_over_builtin() {
 }
 
 #[test]
+fn abs_builtin_lowers_to_compare_neg_and_select() {
+    // abs(x) = if x < 0 { -x } else { x }: compare against the literal 0 and
+    // negate on the true branch. One Int(0) constant, exactly one Lt and Neg.
+    let parsed = parse_source("fn f(x: i32) { abs(x) }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_t, consts, ins) = decode_first_fn(&out.module);
+    assert!(consts.entries.contains(&Constant::Int(0)));
+    assert_eq!(
+        ins.iter().filter(|i| matches!(i, Instruction::Lt)).count(),
+        1
+    );
+    assert_eq!(
+        ins.iter().filter(|i| matches!(i, Instruction::Neg)).count(),
+        1
+    );
+}
+
+#[test]
+fn sign_builtin_lowers_to_three_way_select() {
+    // sign(x): -1 if x<0, 1 if x>0, else 0 -> Int(-1)/Int(0)/Int(1), a Lt+Gt.
+    let parsed = parse_source("fn f(x: i32) { sign(x) }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let (_t, consts, ins) = decode_first_fn(&out.module);
+    assert!(consts.entries.contains(&Constant::Int(-1)));
+    assert!(consts.entries.contains(&Constant::Int(0)));
+    assert!(consts.entries.contains(&Constant::Int(1)));
+    assert_eq!(
+        ins.iter().filter(|i| matches!(i, Instruction::Lt)).count(),
+        1
+    );
+    assert_eq!(
+        ins.iter().filter(|i| matches!(i, Instruction::Gt)).count(),
+        1
+    );
+}
+
+#[test]
+fn unary_numeric_builtin_wrong_arity_is_reported() {
+    // abs/sign want exactly one argument; two is E0022.
+    let parsed = parse_source("fn f(a: i32, b: i32) { abs(a, b) }\n");
+    let out = emit(&parsed.source);
+    assert_eq!(out.errors.len(), 1);
+    assert_eq!(out.errors[0].code(), "E0022");
+    assert!(matches!(
+        out.errors[0].kind,
+        capy_emitter::EmitErrorKind::MethodArity {
+            want: 1,
+            got: 2,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn user_fn_abs_takes_precedence_over_builtin() {
+    // A user-declared `fn abs` resolves as an ordinary call, shadowing the
+    // numeric built-in, so no compare/negate select is emitted.
+    let parsed = parse_source("fn abs(x: i32) -> i32 { x }\nfn g() { abs(9) }\n");
+    let out = emit(&parsed.source);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let functions_section = out
+        .module
+        .sections
+        .iter()
+        .find(|s| s.tag == SectionTag::Functions)
+        .expect("functions section");
+    let functions = FunctionTable::decode(&functions_section.payload).expect("decode");
+    let g = decode(&functions.entries[1].code).expect("decode g");
+    assert!(g
+        .iter()
+        .any(|i| matches!(i, Instruction::Call { argc: 1, .. })));
+    assert!(!g.iter().any(|i| matches!(i, Instruction::Neg)));
+}
+
+#[test]
 fn break_with_value_inside_loop_compiles() {
     let parsed = parse_source("fn br() { loop { break 7; } }\n");
     let out = emit(&parsed.source);

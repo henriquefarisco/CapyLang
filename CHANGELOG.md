@@ -10,6 +10,15 @@ Slice identifiers (e.g. **S1**, **S2**) refer to the roadmap captured in
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-06-21
+
+### Added
+- S10: integer `abs(x)` and `sign(x)` numeric builtins. Emitter-only
+  lowering onto compare-and-branch selects against the literal `0` (no new
+  opcode); `abs` negates on `x < 0`, `sign` yields `-1`/`0`/`1`. User-defined
+  `fn abs` / `fn sign` still shadow the builtins; wrong arity reports `E0022`.
+  Completes the integer numeric builtin set (`min`/`max`/`clamp`/`abs`/`sign`).
+
 ## [0.1.11] - 2026-06-21
 
 ### Added

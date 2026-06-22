@@ -290,6 +290,38 @@ fn clamp_builtin_computes_at_runtime() {
 }
 
 #[test]
+fn abs_builtin_computes_at_runtime() {
+    // abs returns the magnitude; composes with the other numeric builtins.
+    assert_eq!(run_source("fn main() { abs(5) }\n").unwrap(), Value::Int(5));
+    assert_eq!(
+        run_source("fn main() { abs(-5) }\n").unwrap(),
+        Value::Int(5)
+    );
+    assert_eq!(run_source("fn main() { abs(0) }\n").unwrap(), Value::Int(0));
+    assert_eq!(
+        run_source("fn main() { abs(min(-3, -8)) }\n").unwrap(),
+        Value::Int(8)
+    );
+}
+
+#[test]
+fn sign_builtin_computes_at_runtime() {
+    // sign yields -1 / 0 / 1 for negative / zero / positive inputs.
+    assert_eq!(
+        run_source("fn main() { sign(7) }\n").unwrap(),
+        Value::Int(1)
+    );
+    assert_eq!(
+        run_source("fn main() { sign(-7) }\n").unwrap(),
+        Value::Int(-1)
+    );
+    assert_eq!(
+        run_source("fn main() { sign(0) }\n").unwrap(),
+        Value::Int(0)
+    );
+}
+
+#[test]
 fn explicit_return_short_circuits() {
     assert_eq!(
         run_source("fn main() { return 7; }\n").unwrap(),

@@ -1323,6 +1323,10 @@ impl<'a> FunctionEmitter<'a> {
             // S10 numeric built-in `clamp(x, lo, hi)` = `max(lo, min(x, hi))`;
             // a user-declared `fn clamp` keeps precedence (checked above).
             return self.emit_clamp_builtin(args, span);
+        } else if name == "abs" || name == "sign" {
+            // S10 single-arg numeric built-ins; a user-declared `fn abs` /
+            // `fn sign` keeps precedence (checked above).
+            return self.emit_unary_numeric_builtin(name, args, span);
         } else {
             return Err(EmitError::new(
                 EmitErrorKind::UnknownFunction { name: name.clone() },
@@ -1472,6 +1476,84 @@ impl<'a> FunctionEmitter<'a> {
         self.emit_op(Opcode::LoadLocal);
         self.emit_u32(lo_slot);
         self.mark_label(max_end);
+        Ok(())
+    }
+
+    /// Lowers the single-argument integer built-ins `abs(x)` and `sign(x)`
+    /// onto compare-and-branch selects against the integer literal `0` (S10
+    /// numeric helpers; no new opcode). `abs` negates on `x < 0`; `sign`
+    /// yields `-1`, `0` or `1`. A user-declared `fn abs` / `fn sign` keeps
+    /// precedence (checked in `emit_call`); a wrong argument count is `E0022`.
+    fn emit_unary_numeric_builtin(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<(), EmitError> {
+        if args.len() != 1 {
+            return Err(EmitError::new(
+                EmitErrorKind::MethodArity {
+                    method: if name == "abs" { "abs" } else { "sign" },
+                    want: 1,
+                    got: args.len(),
+                },
+                span,
+            ));
+        }
+        let x_slot = self.alloc_unnamed_local();
+        self.emit_expr(&args[0])?;
+        self.emit_op(Opcode::StoreLocal);
+        self.emit_u32(x_slot);
+        let zero = self.consts.intern_int(0);
+        if name == "abs" {
+            // if x < 0 { -x } else { x }
+            self.emit_op(Opcode::LoadLocal);
+            self.emit_u32(x_slot);
+            self.emit_op(Opcode::LoadConst);
+            self.emit_u32(zero);
+            self.emit_op(Opcode::Lt);
+            let else_label = self.new_label();
+            let end_label = self.new_label();
+            self.emit_jump(Opcode::JumpIfFalse, else_label, span);
+            self.emit_op(Opcode::LoadLocal);
+            self.emit_u32(x_slot);
+            self.emit_op(Opcode::Neg);
+            self.emit_jump(Opcode::Jump, end_label, span);
+            self.mark_label(else_label);
+            self.emit_op(Opcode::LoadLocal);
+            self.emit_u32(x_slot);
+            self.mark_label(end_label);
+        } else {
+            // if x < 0 { -1 } else if x > 0 { 1 } else { 0 }
+            let neg_one = self.consts.intern_int(-1);
+            let one = self.consts.intern_int(1);
+            self.emit_op(Opcode::LoadLocal);
+            self.emit_u32(x_slot);
+            self.emit_op(Opcode::LoadConst);
+            self.emit_u32(zero);
+            self.emit_op(Opcode::Lt);
+            let not_neg = self.new_label();
+            let end_label = self.new_label();
+            self.emit_jump(Opcode::JumpIfFalse, not_neg, span);
+            self.emit_op(Opcode::LoadConst);
+            self.emit_u32(neg_one);
+            self.emit_jump(Opcode::Jump, end_label, span);
+            self.mark_label(not_neg);
+            self.emit_op(Opcode::LoadLocal);
+            self.emit_u32(x_slot);
+            self.emit_op(Opcode::LoadConst);
+            self.emit_u32(zero);
+            self.emit_op(Opcode::Gt);
+            let zero_label = self.new_label();
+            self.emit_jump(Opcode::JumpIfFalse, zero_label, span);
+            self.emit_op(Opcode::LoadConst);
+            self.emit_u32(one);
+            self.emit_jump(Opcode::Jump, end_label, span);
+            self.mark_label(zero_label);
+            self.emit_op(Opcode::LoadConst);
+            self.emit_u32(zero);
+            self.mark_label(end_label);
+        }
         Ok(())
     }
 

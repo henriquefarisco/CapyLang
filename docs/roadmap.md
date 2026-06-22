@@ -141,10 +141,15 @@ whole sequence converges on the Snake / Asteroids benchmark goal.
     numeric builtins lower to compare + conditional-jump (emitter-only, no new
     wire, no const-pool); user-defined `min` / `max` shadow the builtins, and
     wrong arity reuses `E0022`.
-  - **Third slice delivered (Unreleased):** integer `clamp(x, lo, hi)` =
+  - **Third slice delivered (0.1.11):** integer `clamp(x, lo, hi)` =
     `max(lo, min(x, hi))` lowers to two compare-and-branch selects (emitter-only,
     no new opcode, no const-pool); a user-defined `clamp` shadows it and wrong
     arity reuses `E0022`.
+  - **Fourth slice delivered (Unreleased):** single-arg integer `abs(x)` and
+    `sign(x)` lower to compare-and-branch selects against the literal `0`
+    (emitter-only, no new opcode); user-defined `fn abs` / `fn sign` shadow
+    them. Completes the integer numeric builtin set
+    (`min`/`max`/`clamp`/`abs`/`sign`).
   - Remaining: the broader string stdlib helpers and non-integer numerics.
   - Depends on: S6.2 (collections).
 
