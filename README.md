@@ -1,6 +1,6 @@
 # CapyLang
 
-Version: 0.1.12
+Version: 0.1.13
 
 CapyLang is the external language-core repository for CapyOS.
 
@@ -262,7 +262,7 @@ evaluates to `7`. Field access `p.x` stays deferred to the type checker.
 
 ## CapyOS integration contract
 
-CapyOS core pinned: `0.8.0-alpha.262+20260602`.
+CapyOS core pinned: `0.10.0-alpha.1+20260903`.
 
 CapyOS integration must follow:
 
