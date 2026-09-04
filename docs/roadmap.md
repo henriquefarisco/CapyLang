@@ -7,7 +7,7 @@ Etapa 15) and records, per slice, the dependencies, the acceptance
 criteria and the validation gate.
 
 - CapyLang version: `0.1.8`
-- CapyOS core pinned: `0.8.0-alpha.262+20260602` (see `docs/compatibility.md`)
+- CapyOS core pinned: `0.10.0-alpha.1+20260903` (see `docs/compatibility.md`)
 - Authority order for decisions: `docs/compatibility.md` -> `docs/integration.md`
   -> `docs/lexer.md` -> `docs/grammar.ebnf` -> `docs/bytecode-v0.md` ->
   this file -> `CHANGELOG.md` -> CapyOS cross-repo docs.

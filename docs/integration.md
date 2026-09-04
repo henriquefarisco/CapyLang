@@ -59,4 +59,4 @@ Official integration belongs to CapyOS Etapa 15. Development in this repository 
 - `CapyOS/docs/operations/manual-module-deploy-runbook.md`
 - `CapyOS/docs/architecture/capypkg-adapter.md`
 
-CapyOS core pinned for this contract: `0.8.0-alpha.262+20260602`.
+CapyOS core pinned for this contract: `0.10.0-alpha.1+20260903`.
