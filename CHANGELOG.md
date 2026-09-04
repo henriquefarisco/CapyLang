@@ -10,6 +10,11 @@ Slice identifiers (e.g. **S1**, **S2**) refer to the roadmap captured in
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-09-04
+
+### Changed
+- Publish the CapyPKG manifest with the Etapa 9 ABI compatibility metadata.
+
 ## [0.1.12] - 2026-06-21
 
 ### Added
